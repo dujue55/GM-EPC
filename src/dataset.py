@@ -124,9 +124,10 @@ class IEMOCAPDataset(Dataset):
         # 用于存储对话回合，键是 Utterance ID (e.g., Ses01F_impro01_F000)
         dialog_data = {} 
         
-        # 正则表达式用于解析标注文件
-        # e.g., '[ 0.0000 - 0.9999]: Ses01F_impro01_F000: HEY!'
-        utterance_regex = re.compile(r'\[\s*([\d\.]+)\s*-\s*([\d\.]+)]\s*:\s*(\w+)\s*:\s*(.*)', re.S)
+        # 正则表达式用于解析转录文件
+        # e.g., '[ 0.0000 - 0.9999 ] Ses01F_impro01_F000: HEY!'
+        # 修正后的正则表达式，以兼容更常见的 IEMOCAP 格式
+        utterance_regex = re.compile(r'\[\s*[\d\.]+\s*-\s*[\d\.]+\s*\]\s*(\w+)\s*:\s*(.*)', re.S)
 
 
         for trans_file_name in dialog_trans_files:
@@ -155,9 +156,11 @@ class IEMOCAPDataset(Dataset):
         dialog_emo_files = [f for f in os.listdir(emotion_dir) if f.endswith('.txt')]
         
         
-        # 正则表达式用于解析情绪标注文件
+       # 正则表达式用于解析情绪标注文件
         # e.g., '[ 0.0000 - 0.9999 ] - Ses01F_impro01_F000 [neu]'
-        emo_regex = re.compile(r'\[.+?\]\s*-\s*(\w+)\s*\[(\w+)\]', re.S)
+        # 修正后的正则表达式，以应对可能存在的多余空行和复杂分隔符
+        # 目标是获取 ID 和标签
+        emo_regex = re.compile(r'\[.+?\]\s*-\s*(\w+)\s*\[(\w+)\]', re.IGNORECASE | re.DOTALL)
 
 
         final_utterance_list = [] # 最终按时间顺序排列的回合列表
