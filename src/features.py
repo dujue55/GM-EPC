@@ -28,7 +28,7 @@ def load_feature_extractors(device):
     print(f"Loading feature extractors to device: {device}...")
     
     # 1. 文本特征提取器 (BERT Base Uncased) - 沿用之前的修正
-    MODEL_NAME = "google/bert-base-uncased" # 使用完整的官方路径
+    MODEL_NAME = "bert-base-uncased"
     
     global_models['tokenizer'] = AutoTokenizer.from_pretrained(MODEL_NAME, use_fast=False)
     global_models['text_model'] = AutoModel.from_pretrained(MODEL_NAME, use_fast=False).to(device)
