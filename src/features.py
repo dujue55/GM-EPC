@@ -76,7 +76,14 @@ def extract_single_feature(text_list, audio_path_list):
         # --- 1. 文本特征提取 (F_t) ---
         
         # 将文本编码为 tokens
-        inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=max_length=512)
+        inputs = tokenizer(
+            text,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=512
+        )
+
         inputs = {k: v.to(device) for k, v in inputs.items()}
         
         # 提取特征
