@@ -30,14 +30,15 @@ def load_feature_extractors(device):
     # 1. 文本特征提取器 (BERT Base Uncased)
     MODEL_NAME = "bert-base-uncased" # 使用最原始名称
 
-    # 关键修正：使用 use_auth_token=None 来覆盖并阻止传递不兼容的参数
     global_models['tokenizer'] = AutoTokenizer.from_pretrained(
         MODEL_NAME, 
-        use_auth_token=None  # <--- 正确修正
+        trust_remote_code=False,
+        revision="main"
     )
     global_models['text_model'] = AutoModel.from_pretrained(
         MODEL_NAME, 
-        use_auth_token=None  # <--- 正确修正
+        trust_remote_code=False,
+        revision="main"
     ).to(device)
     
     
@@ -47,7 +48,7 @@ def load_feature_extractors(device):
     try:
         global_models['speech_model'] = AutoModel.from_pretrained(
             EMOTION2VEC_MODEL_ID,
-            use_auth_token=None  # <--- 语音模型也应用相同的修正
+            trust_remote_code=True
         ).to(device)
         print(f"✅ emotion2vec model loaded: {EMOTION2VEC_MODEL_ID}")
         
