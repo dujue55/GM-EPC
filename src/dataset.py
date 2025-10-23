@@ -129,14 +129,18 @@ class IEMOCAPDataset(Dataset):
         # 用于存储对话回合，键是 Utterance ID (e.g., Ses01F_impro01_F000)
         dialog_data = {} 
 
-        # 【修正转录正则】 使用一个准确且包含所有四个捕获组的正则。
+        # 修正后的正则表达式 (保留 4 个捕获组，放宽空白要求)
         # 匹配：[ 0.0000 - 0.9999 ] Ses01F_impro01_F000: HEY!
-        trans_regex_full = re.compile(r'\[\s*([\d\.]+)\s*-\s*([\d\.]+)\s*\]\s*(\w+)\s*:\s*(.*)', re.S)
+        trans_regex_full = re.compile(r'\[\s*([\d\.]+)\s*-\s*([\d\.]+)\s*\]\s*(\w+)\s*:\s*(.*)', re.M) 
+        # 注意：我们使用 re.M (多行模式) 替代 re.S，re.S可能会读取整个文件为一行，破坏解析。
 
 
         for trans_file_name in dialog_trans_files:
             trans_path = os.path.join(session_dir, trans_file_name)
             
+            # --- 新增的 content 变量初始化 ---
+            content = ""
+
             try:
                 with open(trans_path, 'r', encoding='utf-8') as f:
                     content = f.read()
@@ -144,7 +148,14 @@ class IEMOCAPDataset(Dataset):
                 # 尝试 latin-1
                 with open(trans_path, 'r', encoding='latin-1') as f:
                     content = f.read()
-                
+            
+            # 🚨 修正代码：跳过 IEMOCAP 文件头
+            # 文件头通常以非 [ 开头，直到找到第一个 [
+            # 确保在文件读取成功后执行，但要在正则匹配之前
+            if content.find('[') != -1: # 检查是否找到了时间戳的起始方括号
+                content = content[content.find('['):] 
+            # -----------------------------
+
             # 找到所有匹配的回合 - 匹配四个捕获组
             matches = trans_regex_full.findall(content)
             
