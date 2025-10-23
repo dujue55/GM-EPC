@@ -27,31 +27,48 @@ def load_feature_extractors(device):
     """
     print(f"Loading feature extractors to device: {device}...")
     
-    # 1. 文本特征提取器 (BERT Base Cased)
-    # 使用 AutoModel 自动加载模型，确保使用适当的模型名
-    MODEL_NAME = "bert-base-uncased" 
+    # 1. 文本特征提取器 (BERT Base Uncased) - 沿用之前的修正
+    MODEL_NAME = "google/bert-base-uncased" # 使用完整的官方路径
     
-    global_models['tokenizer'] = AutoTokenizer.from_pretrained(MODEL_NAME)
-    global_models['text_model'] = AutoModel.from_pretrained(MODEL_NAME).to(device)
+    global_models['tokenizer'] = AutoTokenizer.from_pretrained(MODEL_NAME, use_fast=False)
+    global_models['text_model'] = AutoModel.from_pretrained(MODEL_NAME, use_fast=False).to(device)
+    
     
     # 2. 语音特征提取器 (emotion2vec)
-    # 根据 emotion2vec 论文，它基于 WavLM，通常在 HuggingFace 上有特定的命名空间
-    # 假设使用 emotion2vec/emotion2vec_base 或一个兼容 WavLM 的检查点
-    SPEECH_MODEL_NAME = "audeering/wavlm-base" # 占位符，如果 emotion2vec 库不同需修改
+    # 使用您刚刚确认的精确模型 ID，并移除复杂的 try/except 逻辑
+    EMOTION2VEC_MODEL_ID = "emotion2vec/emotion2vec_plus_base" 
     
-    # 警告：emotion2vec 的官方实现可能需要特定的加载代码。这里使用 WavLM 兼容的占位符。
     try:
-        global_models['speech_model'] = AutoModel.from_pretrained("emotion2vec/emotion2vec_base").to(device)
-    except Exception:
-        print("Warning: emotion2vec model not found directly. Using WavLM base as placeholder.")
-        global_models['speech_model'] = AutoModel.from_pretrained(SPEECH_MODEL_NAME).to(device)
+        # AutoModel.from_pretrained 适用于大多数 Hugging Face 模型
+        global_models['speech_model'] = AutoModel.from_pretrained(
+            EMOTION2VEC_MODEL_ID
+        ).to(device)
+        print(f"✅ emotion2vec model loaded: {EMOTION2VEC_MODEL_ID}")
+        
+    except Exception as e:
+        # 如果加载失败（例如网络问题或模型结构特殊），则给出明确提示并退出
+        raise RuntimeError(f"Failed to load emotion2vec model {EMOTION2VEC_MODEL_ID}. The specific error is: {e}") 
 
 
     global_models['text_model'].eval()
     global_models['speech_model'].eval()
     global_models['device'] = device
-    print("Feature extractors loaded successfully.")
 
+    # === 新增代码块：验证模型维度 ===
+    # 验证文本维度
+    actual_text_dim = global_models['text_model'].config.hidden_size
+    print(f"✅ Text Model loaded. Configured dim: {TEXT_DIM}, Actual dim: {actual_text_dim}")
+    if actual_text_dim != TEXT_DIM:
+        print(f"⚠️ 警告：TEXT_DIM 常量 ({TEXT_DIM}) 与实际模型维度 ({actual_text_dim}) 不匹配。请修正 TEXT_DIM。")
+
+    # 验证语音维度 (您关注的重点)
+    actual_speech_dim = global_models['speech_model'].config.hidden_size
+    print(f"✅ Speech Model loaded. Configured dim: {SPEECH_DIM}, Actual dim: {actual_speech_dim}")
+    if actual_speech_dim != SPEECH_DIM:
+        print(f"⚠️ 警告：SPEECH_DIM 常量 ({SPEECH_DIM}) 与实际模型维度 ({actual_speech_dim}) 不匹配。请修正 SPEECH_DIM。")
+    # ================================
+    
+    print("Feature extractors loaded successfully.")
 
 def extract_single_feature(text_list, audio_path_list):
     """
