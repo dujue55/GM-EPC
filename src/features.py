@@ -1,41 +1,36 @@
 # src/features.py
-
 import torch
 import torchaudio
 import librosa
 from transformers import AutoModel, AutoTokenizer
 import os
 import numpy as np
-from transformers.utils import hub
-import os
+from transformers.utils import hub # 如果不再使用 hub.disable_chat_templates() 也可以删除这个导入
 
-os.environ["HF_HUB_DISABLE_CHAT_TEMPLATES"] = "1"
 
 # --- 特征维度常量 ---
-TEXT_DIM = 768    # 假设使用 BERT Base，其输出维度为 768 (D_t)
+TEXT_DIM = 768 # 假设使用 BERT Base，其输出维度为 768 (D_t)
 SPEECH_DIM = 1024 # 假设 emotion2vec 使用 1024 维度 (D_s) 
 
 # --- 全局模型实例 ---
-# 这些模型将在 Kaggle 上加载到 GPU
-global_models = {
+# ... (保持不变)
+
+global_models ={
     'text_model': None,
     'speech_model': None,
     'tokenizer': None,
     'device': torch.device("cpu") # 默认为 CPU，在 run_experiment 中会被更新
 }
 
-hub.disable_chat_templates()
 
 def load_feature_extractors(device):
     """
     加载所有预训练的特征提取器 (BERT 和 emotion2vec)。
     """
     print(f"Loading feature extractors to device: {device}...")
-    
-    # 1. 文本特征提取器 (BERT Base Uncased)
-    MODEL_NAME = "bert-base-uncased" # 使用最原始名称
 
-    MODEL_NAME = "bert-base-uncased"
+    # 1. 文本特征提取器 (BERT Base Uncased)
+    MODEL_NAME = "bert-base-uncased"  # 使用最原始名称
 
     global_models['tokenizer'] = AutoTokenizer.from_pretrained(
         MODEL_NAME,
