@@ -141,8 +141,7 @@ class IEMOCAPDataset(Dataset):
                 # 尝试 latin-1
                 with open(trans_path, 'r', encoding='latin-1') as f:
                     content = f.read()
-                
-            
+
             # 【新增调试点：re.search 检查和打印原始行】
             # 我们只在第一个文件上进行详细检查
             if not dialog_data and trans_file_name == dialog_trans_files[0]:
@@ -152,13 +151,17 @@ class IEMOCAPDataset(Dataset):
                 for i, line in enumerate(content.splitlines()):
                     if i > 20: break # 只检查前 20 行
                     line = line.strip()
-                    if line.startswith('['): # 只检查包含时间戳的行
+                    
+                    # 🚨 修正：移除 startswith('[') 检查，强制打印行内容
+                    
+                    # 仅当行不为空时才打印
+                    if line:
                         match = trans_regex_full.search(line)
+                        # 打印原始行，并显示是否匹配
                         print(f"  Line {i}: Matches={bool(match)}. Content: {line[:100]}")
                         if match:
-                             # 如果匹配成功，打印捕获组
-                             print(f"  --> Captures: ID={match.group(3)}, Text={match.group(4)[:50]}...")
-
+                            # 如果匹配成功，打印捕获组
+                            print(f"  --> Captures: ID={match.group(3)}, Text={match.group(4)[:50]}...")
 
             # 找到所有匹配的回合 - 匹配四个捕获组
             matches = trans_regex_full.findall(content)
