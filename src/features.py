@@ -6,6 +6,7 @@ from transformers import AutoModel, AutoTokenizer
 import os
 import numpy as np
 from transformers.utils import hub # 如果不再使用 hub.disable_chat_templates() 也可以删除这个导入
+from funasr import AutoModel # <-- 确保 funasr 已安装
 
 
 # --- 特征维度常量 ---
@@ -46,49 +47,35 @@ def load_feature_extractors(device):
     ).to(device)
     
     # 2. 语音特征提取器 (emotion2vec)
-    EMOTION2VEC_MODEL_ID = "emotion2vec/emotion2vec_plus_base" 
-    
+    # 【已修正缩进：属于 load_feature_extractors 函数体】
+    EMOTION2VEC_MODEL_ID = "iic/emotion2vec_plus_base" 
+
     try:
-        global_models['speech_model'] = AutoModel.from_pretrained(
-            EMOTION2VEC_MODEL_ID,
-            trust_remote_code=True,
-            revision="main",   # ✅ 避免分支歧义
-            token=None         # ✅ 禁用身份验证（可选）
-        ).to(device)
+        # 修正点 1：使用 FunASR 的 AutoModel，并将其存储到全局字典
+        global_models['speech_model'] = AutoModel(model=EMOTION2VEC_MODEL_ID)
         print(f"✅ emotion2vec model loaded: {EMOTION2VEC_MODEL_ID}")
-        
+
     except Exception as e:
-        # 如果加载失败（例如网络问题或模型结构特殊），则给出明确提示并退出
-        raise RuntimeError(f"Failed to load emotion2vec model {EMOTION2VEC_MODEL_ID}. The specific error is: {e}") 
+        raise RuntimeError(f"Failed to load emotion2vec model {EMOTION2VEC_MODEL_ID}. The specific error is: {e}")
 
-
-    global_models['text_model'].eval()
-    global_models['speech_model'].eval()
-    global_models['device'] = device
-
-    # === 新增代码块：验证模型维度 ===
-    # 验证文本维度
+    # === 验证模型维度 ===
+    # 验证文本维度 (保持不变，BERT模型支持)
     actual_text_dim = global_models['text_model'].config.hidden_size
     print(f"✅ Text Model loaded. Configured dim: {TEXT_DIM}, Actual dim: {actual_text_dim}")
     if actual_text_dim != TEXT_DIM:
         print(f"⚠️ 警告：TEXT_DIM 常量 ({TEXT_DIM}) 与实际模型维度 ({actual_text_dim}) 不匹配。请修正 TEXT_DIM。")
 
     # 验证语音维度 (您关注的重点)
-    actual_speech_dim = global_models['speech_model'].config.hidden_size
-    print(f"✅ Speech Model loaded. Configured dim: {SPEECH_DIM}, Actual dim: {actual_speech_dim}")
-    if actual_speech_dim != SPEECH_DIM:
-        print(f"⚠️ 警告：SPEECH_DIM 常量 ({SPEECH_DIM}) 与实际模型维度 ({actual_speech_dim}) 不匹配。请修正 SPEECH_DIM。")
-    # ================================
-    
+    # 修正点 2：FunASR 模型实例不提供标准的 .config.hidden_size 属性，此处仅打印常量，并依赖特征提取时进行运行时验证。
+    print(f"✅ Speech Model loaded. Configured dim: {SPEECH_DIM}") 
+
     print("Feature extractors loaded successfully.")
+    # 【load_feature_extractors 函数体结束】
+
 
 def extract_single_feature(text_list, audio_path_list):
     """
-    提取单个对话样本（L个回合）的特征。这是在 Dataloader 的 worker 中调用的函数。
-    
-    :param text_list: [u_t-L+1_text, ..., u_t_text]
-    :param audio_path_list: [u_t-L+1_path, ..., u_t_path]
-    :return: F_t (L, D_t), F_s (L, D_s)
+    提取单个对话样本（L个回合）的特征。
     """
     device = global_models['device']
     text_model = global_models['text_model']
@@ -100,10 +87,10 @@ def extract_single_feature(text_list, audio_path_list):
     F_s_list = []
 
     # 遍历 L 个回合
+    # 【已修正缩进：属于 extract_single_feature 函数体】
     for text, audio_path in zip(text_list, audio_path_list):
         
         # --- 1. 文本特征提取 (F_t) ---
-        
         # 将文本编码为 tokens
         inputs = tokenizer(
             text,
@@ -126,39 +113,40 @@ def extract_single_feature(text_list, audio_path_list):
         # --- 2. 语音特征提取 (F_s) ---
         
         try:
-            # 加载音频文件 (使用 librosa 或 torchaudio)
-            speech_array, sampling_rate = torchaudio.load(audio_path)
-            
-            # 确保采样率为 16kHz (WavLM/emotion2vec 要求)
-            if sampling_rate != 16000:
-                speech_array = torchaudio.transforms.Resample(orig_freq=sampling_rate, new_freq=16000)(speech_array)
-            
-            # 语音模型通常只需要单声道
-            speech_array = speech_array.squeeze(0).to(device).unsqueeze(0) # [1, Samples]
-            
-            # 提取特征
+            # 提取特征：使用 FunASR 模型的 generate 接口
             with torch.no_grad():
-                # 注意：emotion2vec/WavLM 的输入处理和输出层可能需要调整，这里是基础 WavLM/HuBERT 接口
-                speech_outputs = speech_model(speech_array, output_hidden_states=True)
-                # 提取 utterance 级别的语音特征（通常是最后一层所有帧的平均值）
-                
-                # 假设提取最后一层隐藏状态的平均值
-                last_hidden_state = speech_outputs.last_hidden_state.squeeze(0) # [Frames, D_s]
-                speech_feature = torch.mean(last_hidden_state, dim=0).cpu() # (D_s)
-            
-            F_s_list.append(speech_feature)
+                # FunASR 模型的 generate 方法直接接受文件路径作为输入
+                res = speech_model.generate(
+                    input=audio_path, 
+                    granularity="utterance", # 提取话语级别的特征
+                    extract_embedding=True # 确保返回特征向量
+                )
+
+                # FunASR 的 generate 结果通常是一个包含字典的列表，其中 'feats' 键对应特征
+                if isinstance(res, list) and res and 'feats' in res[0]:
+                    speech_feature_np = res[0]['feats']
+                    # 将 NumPy 数组转换为 PyTorch 张量
+                    speech_feature = torch.from_numpy(speech_feature_np).float().cpu().squeeze() 
+                    
+                    # 运行时验证：确保实际维度与常量一致
+                    if speech_feature.shape[-1] != SPEECH_DIM:
+                        print(f"⚠️ 运行时警告：音频文件 {audio_path} 实际语音维度 ({speech_feature.shape[-1]}) 与 SPEECH_DIM ({SPEECH_DIM}) 不匹配！")
+
+                    F_s_list.append(speech_feature)
+                else:
+                    raise RuntimeError("FunASR generate did not return expected feature format or 'feats' key.")
 
         except Exception as e:
-            print(f"Error loading or processing audio {audio_path}: {e}. Returning zero vector.")
+            print(f"Error loading or processing audio {audio_path} using FunASR: {e}. Returning zero vector.")
             # 如果音频处理失败，返回零向量作为占位符
             F_s_list.append(torch.zeros(SPEECH_DIM))
-            
-    
+                
+        
     # 将 L 个回合的特征堆叠
     F_t_sequence = torch.stack(F_t_list, dim=0) # [L, D_t]
     F_s_sequence = torch.stack(F_s_list, dim=0) # [L, D_s]
     
-    return F_t_sequence, F_s_sequence
+    return F_t_sequence, F_s_sequence # 【已修正缩进：属于 extract_single_feature 函数体】
 
 
 # ----------------------------------------------------------------------
@@ -187,6 +175,7 @@ if __name__ == '__main__':
     try:
         load_feature_extractors(torch.device("cpu"))
         print(f"Text Model output dim (assumed): {global_models['text_model'].config.hidden_size}")
-        print(f"Speech Model output dim (assumed): {global_models['speech_model'].config.hidden_size}")
+        # FunASR 模型没有 .config 属性，这里需要手动打印或在 extract 函数中验证
+        print(f"Speech Model output dim (expected): {SPEECH_DIM}") 
     except Exception as e:
-        print(f"Model loading FAILED. This is expected if 'transformers' cannot find the checkpoint: {e}")
+        print(f"Model loading FAILED: {e}")
