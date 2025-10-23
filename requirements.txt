@@ -11,3 +11,5 @@ PyYAML
 funasr==1.0.21
 torch_complex
 kaldiio
+modelscope
+hydra-core
