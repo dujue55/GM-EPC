@@ -101,13 +101,10 @@ class IEMOCAPDataset(Dataset):
 
         return all_samples
 
-    # src/dataset.py (替换整个 _collect_session_utterances 函数)
-
     def _collect_session_utterances(self, session):
         """
         解析 IEMOCAP 原始文件，收集一个 Session 内所有回合的文本、标签和音频路径。
         """
-        
         
         # 1. 找到该 Session 下的所有对话目录 (Impro/Script)
         session_dir = os.path.join(self.data_root, session, 'dialog', 'transcriptions')
@@ -116,7 +113,6 @@ class IEMOCAPDataset(Dataset):
         print(f"DEBUG A [{session}]: Checking Transcription Dir: {session_dir}") 
         
         if not os.path.exists(session_dir):
-            # 请确保 self.data_root 是绝对正确的路径！
             print(f"ERROR: Transcription directory not found: {session_dir}. Check data_root path.")
             return [] # 如果路径不存在，返回空列表
 
@@ -129,17 +125,14 @@ class IEMOCAPDataset(Dataset):
         # 用于存储对话回合，键是 Utterance ID (e.g., Ses01F_impro01_F000)
         dialog_data = {} 
 
-        # 修正后的正则表达式 (保留 4 个捕获组，放宽空白要求)
-        # 匹配：[ 0.0000 - 0.9999 ] Ses01F_impro01_F000: HEY!
+        # 【转录正则】使用最通用且保留 4 个捕获组的正则。
         trans_regex_full = re.compile(r'\[\s*([\d\.]+)\s*-\s*([\d\.]+)\s*\]\s*(\w+)\s*:\s*(.*)', re.M) 
-        # 注意：我们使用 re.M (多行模式) 替代 re.S，re.S可能会读取整个文件为一行，破坏解析。
 
 
         for trans_file_name in dialog_trans_files:
             trans_path = os.path.join(session_dir, trans_file_name)
             
-            # --- 新增的 content 变量初始化 ---
-            content = ""
+            content = "" # 确保 content 变量初始化
 
             try:
                 with open(trans_path, 'r', encoding='utf-8') as f:
@@ -148,13 +141,24 @@ class IEMOCAPDataset(Dataset):
                 # 尝试 latin-1
                 with open(trans_path, 'r', encoding='latin-1') as f:
                     content = f.read()
+                
             
-            # 🚨 修正代码：跳过 IEMOCAP 文件头
-            # 文件头通常以非 [ 开头，直到找到第一个 [
-            # 确保在文件读取成功后执行，但要在正则匹配之前
-            if content.find('[') != -1: # 检查是否找到了时间戳的起始方括号
-                content = content[content.find('['):] 
-            # -----------------------------
+            # 【新增调试点：re.search 检查和打印原始行】
+            # 我们只在第一个文件上进行详细检查
+            if not dialog_data and trans_file_name == dialog_trans_files[0]:
+                print(f"DEBUG X: Inspecting first transcription file: {trans_file_name}")
+                
+                # 逐行检查，看是否能匹配
+                for i, line in enumerate(content.splitlines()):
+                    if i > 20: break # 只检查前 20 行
+                    line = line.strip()
+                    if line.startswith('['): # 只检查包含时间戳的行
+                        match = trans_regex_full.search(line)
+                        print(f"  Line {i}: Matches={bool(match)}. Content: {line[:100]}")
+                        if match:
+                             # 如果匹配成功，打印捕获组
+                             print(f"  --> Captures: ID={match.group(3)}, Text={match.group(4)[:50]}...")
+
 
             # 找到所有匹配的回合 - 匹配四个捕获组
             matches = trans_regex_full.findall(content)
@@ -185,14 +189,13 @@ class IEMOCAPDataset(Dataset):
         dialog_emo_files = [f for f in os.listdir(emotion_dir) if f.endswith('.txt')]
         
         # 正则表达式用于解析情绪标注文件
-        # 匹配: [ 0.0000 - 0.9999 ] - Ses01F_impro01_F000 [neu]
-        # 修正：使用更安全的正则捕获 ID 和标签
         emo_regex = re.compile(r'\[.+?\]\s*-\s*(\w+)\s*\[(\w+)\]', re.IGNORECASE | re.DOTALL)
 
 
         final_utterance_list = [] # 最终按时间顺序排列的回合列表
 
         for emo_file_name in dialog_emo_files:
+            # ... (这部分代码保持不变，因为它不是数据为空的原因)
             emo_path = os.path.join(emotion_dir, emo_file_name)
             
             try:
@@ -210,19 +213,14 @@ class IEMOCAPDataset(Dataset):
                 
                 # 检查是否在我们已经解析的转录文本中
                 if utt_id in dialog_data:
-                    # 获取该回合的详细信息
+                    # ... (后续合并逻辑)
                     data = dialog_data[utt_id]
-                    
-                    # 构造音频文件路径
                     dialog_name = "_".join(utt_id.split('_')[:-1])
-                    
                     audio_sub_path = os.path.join(
                         session, 'sentences', 'wav', dialog_name, f'{utt_id}.wav'
                     )
                     full_audio_path = os.path.join(self.data_root, audio_sub_path)
                     
-                    # 如果情绪不在 TARGET_EMOS 内，我们忽略这个回合
-                    # 您的原始代码逻辑是收集所有，然后在 _load_and_split_data 中过滤，这里保持原样
                     if label in TARGET_EMOS or label in ['fru', 'sur', 'dis', 'oth', 'xxx']:
                         final_utterance_list.append({
                             'utt_id': utt_id,
