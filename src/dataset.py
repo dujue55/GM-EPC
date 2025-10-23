@@ -147,15 +147,22 @@ class IEMOCAPDataset(Dataset):
         
         # src/dataset.py 约 255 行
 
-        # 【最终修正的情绪正则】匹配：[TIME] ID LABEL [V,A,D] 这种结构的行
-        # 目标是匹配：[8.2904 - 11.9425] Ses01M_script01_3_F000 neu [4.0000, 2.0000, 2.5000]
+        # 【最终且最宽松的情绪正则】
+        # 目标：匹配 [时间] ID LABEL [VAD] 这种行
+        # 我们只匹配 ID 和紧随其后的标签，忽略时间戳和 VAD 向量的所有细节。
         # 捕获组 1: UTTERANCE_ID (\w+)
         # 捕获组 2: LABEL (\w+)
         emo_regex = re.compile(
-            r'\[[\d\.]+ - [\d\.]+\]\s*(\w+)\s*(\w+)\s*\[[\d\.]+,[\d\.]+,[\d\.]+\]', 
+            # 匹配方括号时间戳（任意字符）
+            r'\[.+?\]\s*' 
+            # 匹配 ID，前面可能有空格 (\s*)
+            r'(\w+)\s+'
+            # 匹配 LABEL，后面可能有空格
+            r'(\w+)\s+'
+            # 匹配 VAD 向量
+            r'\[[\d\.]+,[\d\.]+,[\d\.]+\]', 
             re.IGNORECASE
         )
-
 
         final_utterance_list = [] # 最终按时间顺序排列的回合列表
 
