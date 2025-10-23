@@ -1,6 +1,4 @@
 # Cloud/Production dependencies: Flexible versions for core libraries
-torch
-torchaudio
 transformers>=4.35.0
 librosa
 scikit-learn
