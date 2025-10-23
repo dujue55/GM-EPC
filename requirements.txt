@@ -1,6 +1,6 @@
 # Cloud/Production dependencies: Flexible versions for core libraries
 transformers>=4.35.0
-tokenizers>=0.22.0
+tokenizers==0.21.6
 librosa
 scikit-learn==1.3.2  
 numpy==1.26.4       
