@@ -1,12 +1,10 @@
-# src/features.py
 import torch
-import torchaudio
-import librosa
-from transformers import AutoModel, AutoTokenizer
-import os
-import numpy as np
-from transformers.utils import hub # 如果不再使用 hub.disable_chat_templates() 也可以删除这个导入
-from funasr import AutoModel # <-- 确保 funasr 已安装
+# 1. 导入 transformers 的 AutoModel 并命名为 TransformersAutoModel 或 TextAutoModel
+from transformers import AutoModel as TransformersAutoModel, AutoTokenizer
+
+# 2. 导入 funasr 的 AutoModel，我们继续使用 AutoModel，或者命名为 FunASRAutoModel 或 SpeechAutoModel
+from funasr import AutoModel
+
 
 
 # --- 特征维度常量 ---
@@ -39,7 +37,7 @@ def load_feature_extractors(device):
         revision="main",
         token=None
     )
-    global_models['text_model'] = AutoModel.from_pretrained(
+    global_models['text_model'] = TransformersAutoModel.from_pretrained( # <--- 修正!
         MODEL_NAME,
         trust_remote_code=False,
         revision="main",
@@ -174,8 +172,6 @@ if __name__ == '__main__':
     print("Testing feature extractor loading...")
     try:
         load_feature_extractors(torch.device("cpu"))
-        print(f"Text Model output dim (assumed): {global_models['text_model'].config.hidden_size}")
-        # FunASR 模型没有 .config 属性，这里需要手动打印或在 extract 函数中验证
-        print(f"Speech Model output dim (expected): {SPEECH_DIM}") 
+        print("Model loading test completed.") # 增加一句成功的确认
     except Exception as e:
         print(f"Model loading FAILED: {e}")
