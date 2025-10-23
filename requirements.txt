@@ -1,17 +1,11 @@
-# Core Deep Learning and Audio
-torch>=2.0.0
+# Cloud/Production dependencies: Flexible versions for core libraries
+torch
 torchaudio
-
-# Feature Extraction Models (BERT, WavLM)
 transformers>=4.35.0
-
-# Data Processing and Utilities
 librosa
 scikit-learn
 numpy
 pandas
 tqdm
-
-# Visualization and Configuration
 matplotlib
 PyYAML
