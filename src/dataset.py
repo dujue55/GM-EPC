@@ -153,14 +153,9 @@ class IEMOCAPDataset(Dataset):
         # 捕获组 1: UTTERANCE_ID (\w+)
         # 捕获组 2: LABEL (\w+)
         emo_regex = re.compile(
-            # 匹配方括号时间戳（任意字符）
-            r'\[.+?\]\s*' 
-            # 匹配 ID，前面可能有空格 (\s*)
-            r'(\w+)\s+'
-            # 匹配 LABEL，后面可能有空格
-            r'(\w+)\s+'
-            # 匹配 VAD 向量
-            r'\[[\d\.]+,[\d\.]+,[\d\.]+\]', 
+            r'\[.+?\]\s+'        # 匹配时间戳 [START - END] 和后面的空格
+            r'([\w\-]+)\s+'      # 捕获 Utterance ID (支持字母数字、下划线和短横线)
+            r'([A-Za-z]+)',      # 捕获情绪标签（只匹配字母）
             re.IGNORECASE
         )
 
