@@ -6,6 +6,7 @@ import librosa
 from transformers import AutoModel, AutoTokenizer
 import os
 import numpy as np
+from transformers.utils import hub
 
 # --- 特征维度常量 ---
 TEXT_DIM = 768    # 假设使用 BERT Base，其输出维度为 768 (D_t)
@@ -20,6 +21,7 @@ global_models = {
     'device': torch.device("cpu") # 默认为 CPU，在 run_experiment 中会被更新
 }
 
+hub.disable_chat_templates()
 
 def load_feature_extractors(device):
     """
@@ -30,21 +32,20 @@ def load_feature_extractors(device):
     # 1. 文本特征提取器 (BERT Base Uncased)
     MODEL_NAME = "bert-base-uncased" # 使用最原始名称
 
+    MODEL_NAME = "bert-base-uncased"
+
     global_models['tokenizer'] = AutoTokenizer.from_pretrained(
-        MODEL_NAME, 
+        MODEL_NAME,
         trust_remote_code=False,
         revision="main",
-        token=None,
-        add_chat_template=False
+        token=None
     )
     global_models['text_model'] = AutoModel.from_pretrained(
-        MODEL_NAME, 
+        MODEL_NAME,
         trust_remote_code=False,
         revision="main",
-        token=None,
-        add_chat_template=False
+        token=None
     ).to(device)
-    
     
     # 2. 语音特征提取器 (emotion2vec)
     EMOTION2VEC_MODEL_ID = "emotion2vec/emotion2vec_plus_base" 
