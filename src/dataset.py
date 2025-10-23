@@ -101,65 +101,81 @@ class IEMOCAPDataset(Dataset):
 
         return all_samples
 
+    # src/dataset.py (替换整个 _collect_session_utterances 函数)
+
     def _collect_session_utterances(self, session):
         """
-        【已实现】解析 IEMOCAP 原始文件，收集一个 Session 内所有回合的文本、标签和音频路径。
-        
-        !!! 注意: IEMOCAP 的文件结构非常复杂，此函数是基于标准预处理流程的框架。
-        它假设数据根目录 'IEMOCAP_full_release/' 下有 SessionX 文件夹。
+        解析 IEMOCAP 原始文件，收集一个 Session 内所有回合的文本、标签和音频路径。
         """
         
-        utterances_in_session = []
         
         # 1. 找到该 Session 下的所有对话目录 (Impro/Script)
         session_dir = os.path.join(self.data_root, session, 'dialog', 'transcriptions')
         
+        # --- 调试点 A：确认转录文件夹路径和存在性 ---
+        print(f"DEBUG A [{session}]: Checking Transcription Dir: {session_dir}") 
+        
         if not os.path.exists(session_dir):
+            # 请确保 self.data_root 是绝对正确的路径！
             print(f"ERROR: Transcription directory not found: {session_dir}. Check data_root path.")
-            return []
+            return [] # 如果路径不存在，返回空列表
 
         # 2. 遍历转录文件以获取 Utterance ID, 文本和时间顺序
         dialog_trans_files = [f for f in os.listdir(session_dir) if f.endswith('.txt')]
+
+        # --- 调试点 B：确认找到转录文件数量 ---
+        print(f"DEBUG B [{session}]: Found {len(dialog_trans_files)} transcription files.")
         
         # 用于存储对话回合，键是 Utterance ID (e.g., Ses01F_impro01_F000)
         dialog_data = {} 
-        
-        # 正则表达式用于解析转录文件
-        # e.g., '[ 0.0000 - 0.9999 ] Ses01F_impro01_F000: HEY!'
-        # 修正后的正则表达式，以兼容更常见的 IEMOCAP 格式
-        utterance_regex = re.compile(r'\[\s*[\d\.]+\s*-\s*[\d\.]+\s*\]\s*(\w+)\s*:\s*(.*)', re.S)
+
+        # 【修正转录正则】 使用一个准确且包含所有四个捕获组的正则。
+        # 匹配：[ 0.0000 - 0.9999 ] Ses01F_impro01_F000: HEY!
+        trans_regex_full = re.compile(r'\[\s*([\d\.]+)\s*-\s*([\d\.]+)\s*\]\s*(\w+)\s*:\s*(.*)', re.S)
 
 
         for trans_file_name in dialog_trans_files:
             trans_path = os.path.join(session_dir, trans_file_name)
             
-            with open(trans_path, 'r', encoding='utf-8') as f:
-                content = f.read()
+            try:
+                with open(trans_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+            except UnicodeDecodeError:
+                # 尝试 latin-1
+                with open(trans_path, 'r', encoding='latin-1') as f:
+                    content = f.read()
                 
-            # 找到所有匹配的回合
-            matches = utterance_regex.findall(content)
+            # 找到所有匹配的回合 - 匹配四个捕获组
+            matches = trans_regex_full.findall(content)
             
-            for start_time, end_time, utt_id, text in matches:
+            # 🚨 修正：循环时必须解包四个值
+            for start_time, end_time, utt_id, text_raw in matches:
                 # 规范化文本，移除首尾空白和多余的换行
-                text = text.strip()
+                text = text_raw.strip().replace('\n', ' ')
                 
                 # 预先存储转录信息
                 dialog_data[utt_id] = {
                     'text': text,
-                    'start': float(start_time),
+                    # 存储时间
+                    'start': float(start_time), 
                     'end': float(end_time),
                 }
-        
+
+        # --- 调试点 C：确认正则匹配成功解析到数据 ---
+        print(f"DEBUG C [{session}]: Successfully parsed {len(dialog_data)} utterances from transcriptions.")
+
         # 3. 遍历情绪标注文件来添加情绪标签和时间顺序
         emotion_dir = os.path.join(self.data_root, session, 'dialog', 'EmoEvaluation')
         
+        if not os.path.exists(emotion_dir):
+            print(f"ERROR: Emotion directory not found: {emotion_dir}.")
+            return [] # 如果情绪标注文件夹不存在，返回空
+            
         dialog_emo_files = [f for f in os.listdir(emotion_dir) if f.endswith('.txt')]
         
-        
-       # 正则表达式用于解析情绪标注文件
-        # e.g., '[ 0.0000 - 0.9999 ] - Ses01F_impro01_F000 [neu]'
-        # 修正后的正则表达式，以应对可能存在的多余空行和复杂分隔符
-        # 目标是获取 ID 和标签
+        # 正则表达式用于解析情绪标注文件
+        # 匹配: [ 0.0000 - 0.9999 ] - Ses01F_impro01_F000 [neu]
+        # 修正：使用更安全的正则捕获 ID 和标签
         emo_regex = re.compile(r'\[.+?\]\s*-\s*(\w+)\s*\[(\w+)\]', re.IGNORECASE | re.DOTALL)
 
 
@@ -168,23 +184,25 @@ class IEMOCAPDataset(Dataset):
         for emo_file_name in dialog_emo_files:
             emo_path = os.path.join(emotion_dir, emo_file_name)
             
-            with open(emo_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
+            try:
+                with open(emo_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+            except UnicodeDecodeError:
+                with open(emo_path, 'r', encoding='latin-1') as f:
+                    content = f.read()
+                
             # 找到所有情绪标注匹配项
             matches = emo_regex.findall(content)
             
             for utt_id, label in matches:
                 label = label.lower()
                 
-                # 检查是否是我们需要的 Utterance ID 并且情绪在目标范围内
+                # 检查是否在我们已经解析的转录文本中
                 if utt_id in dialog_data:
                     # 获取该回合的详细信息
                     data = dialog_data[utt_id]
                     
                     # 构造音频文件路径
-                    # 路径格式：/SessionX/sentences/wav/[对话名称]/[utt_id].wav
-                    # 我们需要从 utt_id (e.g., Ses01F_impro01_F000) 中提取对话名称 (e.g., Ses01F_impro01)
                     dialog_name = "_".join(utt_id.split('_')[:-1])
                     
                     audio_sub_path = os.path.join(
@@ -193,8 +211,8 @@ class IEMOCAPDataset(Dataset):
                     full_audio_path = os.path.join(self.data_root, audio_sub_path)
                     
                     # 如果情绪不在 TARGET_EMOS 内，我们忽略这个回合
+                    # 您的原始代码逻辑是收集所有，然后在 _load_and_split_data 中过滤，这里保持原样
                     if label in TARGET_EMOS or label in ['fru', 'sur', 'dis', 'oth', 'xxx']:
-                        # 只有在我们关注的四类情绪内才记录下来，否则作为过滤掉的样本
                         final_utterance_list.append({
                             'utt_id': utt_id,
                             'text': data['text'],
@@ -205,12 +223,12 @@ class IEMOCAPDataset(Dataset):
                         })
 
 
-        # 4. 按时间顺序排序 (IEMOCAP 的标注是按对话分组的，但每个对话内部通常是按时间顺序的)
-        # 确保同一个对话 (dialog_name) 内部的 Utterances 按时间排序
-        # 为了简化，我们假设读取顺序就是时间顺序，并使用 utt_id 的数字后缀进行粗略排序
+        # 4. 按 utt_id 排序确保顺序正确
         final_utterance_list.sort(key=lambda x: x['utt_id'])
         
-        # 5. 最后过滤掉非目标情绪的样本 (通常是在 _load_and_split_data 中进行)
+        # --- 调试点 D：确认最终合并/过滤后的数据量 ---
+        print(f"DEBUG D [{session}]: Final utterance list size: {len(final_utterance_list)}")
+        
         return final_utterance_list
 
     def __len__(self):
