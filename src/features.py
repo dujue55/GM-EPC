@@ -33,12 +33,16 @@ def load_feature_extractors(device):
     global_models['tokenizer'] = AutoTokenizer.from_pretrained(
         MODEL_NAME, 
         trust_remote_code=False,
-        revision="main"
+        revision="main",
+        token=None,
+        add_chat_template=False
     )
     global_models['text_model'] = AutoModel.from_pretrained(
         MODEL_NAME, 
         trust_remote_code=False,
-        revision="main"
+        revision="main",
+        token=None,
+        add_chat_template=False
     ).to(device)
     
     
@@ -48,7 +52,9 @@ def load_feature_extractors(device):
     try:
         global_models['speech_model'] = AutoModel.from_pretrained(
             EMOTION2VEC_MODEL_ID,
-            trust_remote_code=True
+            trust_remote_code=True,
+            revision="main",   # ✅ 避免分支歧义
+            token=None         # ✅ 禁用身份验证（可选）
         ).to(device)
         print(f"✅ emotion2vec model loaded: {EMOTION2VEC_MODEL_ID}")
         
