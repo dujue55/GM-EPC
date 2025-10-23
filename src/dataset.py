@@ -125,9 +125,12 @@ class IEMOCAPDataset(Dataset):
         # 用于存储对话回合，键是 Utterance ID (e.g., Ses01F_impro01_F000)
         dialog_data = {} 
 
-        # 【转录正则】使用最通用且保留 4 个捕获组的正则。
-        trans_regex_full = re.compile(r'\[\s*([\d\.]+)\s*-\s*([\d\.]+)\s*\]\s*(\w+)\s*:\s*(.*)', re.M) 
-
+        # 【最终修正的转录正则】匹配：UtteranceID [TIME_START-TIME_END]: Text
+        # 捕获组 1: UTTERANCE_ID (\w+)
+        # 捕获组 2: START_TIME ([\d\.]+)
+        # 捕获组 3: END_TIME ([\d\.]+)
+        # 捕获组 4: TEXT (.*)
+        trans_regex_full = re.compile(r'(\w+)\s*\[([\d\.]+)-([\d\.]+)]:\s*(.*)', re.M)
 
         for trans_file_name in dialog_trans_files:
             trans_path = os.path.join(session_dir, trans_file_name)
@@ -165,9 +168,9 @@ class IEMOCAPDataset(Dataset):
 
             # 找到所有匹配的回合 - 匹配四个捕获组
             matches = trans_regex_full.findall(content)
-            
-            # 🚨 修正：循环时必须解包四个值
-            for start_time, end_time, utt_id, text_raw in matches:
+
+            # 🚨 修正：循环时必须解包四个值，顺序修改为 ID, START, END, TEXT
+            for utt_id, start_time, end_time, text_raw in matches:
                 # 规范化文本，移除首尾空白和多余的换行
                 text = text_raw.strip().replace('\n', ' ')
                 
