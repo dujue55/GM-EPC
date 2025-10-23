@@ -7,6 +7,9 @@ from transformers import AutoModel, AutoTokenizer
 import os
 import numpy as np
 from transformers.utils import hub
+import os
+
+os.environ["HF_HUB_DISABLE_CHAT_TEMPLATES"] = "1"
 
 # --- 特征维度常量 ---
 TEXT_DIM = 768    # 假设使用 BERT Base，其输出维度为 768 (D_t)
