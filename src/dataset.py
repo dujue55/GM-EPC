@@ -145,8 +145,16 @@ class IEMOCAPDataset(Dataset):
             print(f"ERROR: No .txt files found in {emotion_dir}. Check file extension.")
             return []
         
-        # 【情绪正则 - 最终版本】匹配： - UtteranceID [LABEL]
-        emo_regex = re.compile(r'-\s*(\w+)\s*\[(\w+)\]', re.IGNORECASE)
+        # src/dataset.py 约 255 行
+
+        # 【最终修正的情绪正则】匹配：[TIME] ID LABEL [V,A,D] 这种结构的行
+        # 目标是匹配：[8.2904 - 11.9425] Ses01M_script01_3_F000 neu [4.0000, 2.0000, 2.5000]
+        # 捕获组 1: UTTERANCE_ID (\w+)
+        # 捕获组 2: LABEL (\w+)
+        emo_regex = re.compile(
+            r'\[[\d\.]+ - [\d\.]+\]\s*(\w+)\s*(\w+)\s*\[[\d\.]+,[\d\.]+,[\d\.]+\]', 
+            re.IGNORECASE
+        )
 
 
         final_utterance_list = [] # 最终按时间顺序排列的回合列表
@@ -180,7 +188,7 @@ class IEMOCAPDataset(Dataset):
             # 找到所有情绪标注匹配项
             matches = emo_regex.findall(content)
             
-            for utt_id, label in matches:
+            for utt_id, label in matches: # <--- 解包顺序是 ID, LABEL
                 label = label.lower()
                 
                 # 检查是否在我们已经解析的转录文本中 (这就是 Final list size = 0 的原因)
