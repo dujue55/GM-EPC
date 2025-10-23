@@ -8,4 +8,6 @@ pandas==2.1.4
 tqdm
 matplotlib
 PyYAML
-funasr
+funasr==1.0.21
+torch_complex
+kaldiio
