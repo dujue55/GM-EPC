@@ -194,8 +194,13 @@ class IEMOCAPDataset(Dataset):
             
         dialog_emo_files = [f for f in os.listdir(emotion_dir) if f.endswith('.txt')]
         
-        # 正则表达式用于解析情绪标注文件
-        emo_regex = re.compile(r'\[.+?\]\s*-\s*(\w+)\s*\[(\w+)\]', re.IGNORECASE | re.DOTALL)
+        # src/dataset.py 约 255 行
+
+        # 【最终修正的情绪正则】匹配： - UtteranceID [LABEL]
+        # 捕获组 1: UTTERANCE_ID (\w+)
+        # 捕获组 2: LABEL (\w+)
+        emo_regex = re.compile(r'-\s*(\w+)\s*\[(\w+)\]', re.IGNORECASE) 
+        # 注意：我们去掉了 re.DOTALL (| re.DOTALL)，因为情绪文件是基于行的，re.DOTALL 会干扰。
 
 
         final_utterance_list = [] # 最终按时间顺序排列的回合列表
@@ -210,7 +215,13 @@ class IEMOCAPDataset(Dataset):
             except UnicodeDecodeError:
                 with open(emo_path, 'r', encoding='latin-1') as f:
                     content = f.read()
-                
+
+            # --- DEBUG Y (情绪文件内容检查) ---
+            if not final_utterance_list and emo_file_name == dialog_emo_files[0]:
+                print(f"DEBUG Y (Emo): Inspecting first file {emo_file_name}")
+                # ... 确保这里有打印输出 ...
+            # --- DEBUG Y 结束 ---
+               
             # 找到所有情绪标注匹配项
             matches = emo_regex.findall(content)
             
