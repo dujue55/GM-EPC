@@ -2,9 +2,9 @@
 transformers>=4.35.0
 tokenizers>=0.22.0
 librosa
-scikit-learn
-numpy
-pandas
+scikit-learn==1.3.2  
+numpy==1.26.4       
+pandas==2.1.4        
 tqdm
 matplotlib
 PyYAML
