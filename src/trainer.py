@@ -129,25 +129,21 @@ class Trainer:
                 if labels.dim() > 1:
                     labels = labels.squeeze(-1)
 
-                # 检查模型是否为 GatedMultimodalEPC
-                if isinstance(self.model, GatedMultimodalEPC):
-                    # 假设 GatedMultimodalEPC 的 forward 函数返回 logits 和 gate_weights
-                    # 修正：需要在 model.py 中修改 GatedMultimodalEPC.forward 的返回
-                    # 暂时保留原状，但记住需要在 model.py 中修改：return logits, W_gate
-                    # 假设 model.forward 已经修改为返回 (logits, gate_weights)
-                    try:
-                        logits, gate_weights = self.model(F_t, F_s)
-                        # gate_weights shape: [B, L, D]
-                        # 收集最后一个回合的平均权重 (用于简化分析)
-                        # 门控权重 (W_gate[:, -1, :]) 的平均值：[B]
-                        avg_gate_per_sample = gate_weights[:, -1, :].mean(dim=-1).cpu().numpy()
-                        all_gate_weights.extend(avg_gate_per_sample)
-
-                    except ValueError: 
-                        # 如果模型没有返回 gate_weights (如基线模型)，则只返回 logits
-                        logits = self.model(F_t, F_s)
+                model_output = self.model(F_t, F_s)
+                
+                # 检查输出是否为 (logits, W_gate) 的 tuple
+                if isinstance(model_output, tuple): 
+                    logits = model_output[0]
+                    gate_weights = model_output[1] # 提取门控权重 W_gate
+                    
+                    # 收集最后一个回合的平均权重 (用于简化分析)
+                    # gate_weights shape: [B, L, D] -> 最后一个时间步的平均权重 [B]
+                    avg_gate_per_sample = gate_weights[:, -1, :].mean(dim=-1).cpu().numpy()
+                    all_gate_weights.extend(avg_gate_per_sample)
                 else:
-                    logits = self.model(F_t, F_s)
+                    logits = model_output # 否则，只返回 logits
+                    # gate_weights 保持 None，all_gate_weights 保持空
+                # --- 修正结束 ---
                 
                 loss = self.criterion(logits, labels)
                 total_loss += loss.item() * F_t.size(0)
