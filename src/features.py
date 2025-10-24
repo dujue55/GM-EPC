@@ -89,15 +89,25 @@ def extract_single_feature(text_list, audio_path_list):
             max_length=512
         )
 
-        inputs = {k: v.to(device) for k, v in inputs.items()}
-        
+        # 确保所有必需的输入张量都被移动到 GPU (包括可能缺失的 token_type_ids/position_ids)
+        # 我们将它们移动到 GPU，并确保输入中不包含不需要的 CPU 张量
+        input_ids = inputs['input_ids'].to(device)
+        attention_mask = inputs['attention_mask'].to(device)
+        token_type_ids = inputs.get('token_type_ids', torch.zeros_like(input_ids)).to(device) # 确保 token_type_ids 存在且在 GPU
+
         # 提取特征
         with torch.no_grad():
-            outputs = text_model(**inputs)
-            # 🚨 修正 1：移除 .cpu()，保持在 GPU
+            outputs = text_model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                token_type_ids=token_type_ids 
+            )
+            
+            # 🚨 修正：新增特征赋值行
             text_feature = outputs.last_hidden_state[:, 0, :].squeeze(0) # (D_t)
+
         
-        F_t_list.append(text_feature)
+        F_t_list.append(text_feature) # 现在 text_feature 已定义
 
         # --- 2. 语音特征提取 (F_s) ---
         
