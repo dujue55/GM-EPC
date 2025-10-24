@@ -11,7 +11,7 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 
 # --- 特征维度常量 ---
 TEXT_DIM = 768 
-SPEECH_DIM = 768
+SPEECH_DIM = 768 # 已根据之前的调试结果修正为 768
 
 # --- 全局模型实例 ---
 global_models ={
@@ -49,17 +49,14 @@ def load_feature_extractors(device):
 
     try:
         global_models['speech_model'] = AutoModel(model=EMOTION2VEC_MODEL_ID)
-        # 注意: funasr 模型通常不直接支持 .to(device) 或在内部处理设备，
-        # 但它的 'generate' 接口通常能确保特征在正确的设备上生成。
         print(f"✅ emotion2vec model loaded: {EMOTION2VEC_MODEL_ID}")
 
     except Exception as e:
         raise RuntimeError(f"Failed to load emotion2vec model {EMOTION2VEC_MODEL_ID}. The specific error is: {e}")
 
     # === 关键修正 1：更新全局设备状态 ===
-    # 必须在模型加载后立即更新，确保 extract_single_feature 获取正确的值
     global_models['device'] = device 
-    print(f"✅ Global device state updated to: {global_models['device']}")
+    print(f"✅ Global device state updated to: {global_models['device']}") # 保留这条打印，确保设备状态更新成功
 
     # === 验证模型维度 ===
     actual_text_dim = global_models['text_model'].config.hidden_size
@@ -81,8 +78,7 @@ def extract_single_feature(text_list, audio_path_list):
     speech_model = global_models['speech_model']
     tokenizer = global_models['tokenizer']
     
-    # 调试信息 1：确认当前使用的设备
-    print(f"\n[DEBUG] extract_single_feature using device: {device}")
+    # [已移除] 调试信息 1：确认当前使用的设备
     
     # 初始化特征列表
     F_t_list = []
@@ -103,10 +99,7 @@ def extract_single_feature(text_list, audio_path_list):
         # 确保 inputs 字典中的所有张量都移动到正确的设备 (device)
         inputs = {k: v.to(device) for k, v in inputs.items() if isinstance(v, torch.Tensor)}
         
-        # 调试信息 2：检查输入张量的设备
-        for k, v in inputs.items():
-            if isinstance(v, torch.Tensor):
-                 print(f"[DEBUG] Input tensor '{k}' device: {v.device}")
+        # [已移除] 调试信息 2：检查输入张量的设备
             
         # 提取特征
         with torch.no_grad():
@@ -120,7 +113,6 @@ def extract_single_feature(text_list, audio_path_list):
         F_t_list.append(text_feature)
 
         # --- 2. 语音特征提取 (F_s) ---
-        # ... (FunASR 部分代码不变，因为问题出在 BERT 部分)
         
         try:
             # 提取特征：使用 FunASR 模型的 generate 接口
@@ -139,6 +131,7 @@ def extract_single_feature(text_list, audio_path_list):
                     
                     # 运行时验证：
                     if speech_feature.shape[-1] != SPEECH_DIM:
+                        # 保留这个警告，因为它检查的是数据本身的完整性，非常重要。
                         print(f"⚠️ 运行时警告：音频文件 {audio_path} 实际语音维度 ({speech_feature.shape[-1]}) 与 SPEECH_DIM ({SPEECH_DIM}) 不匹配！")
 
                     F_s_list.append(speech_feature)
