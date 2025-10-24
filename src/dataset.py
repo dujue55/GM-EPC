@@ -132,9 +132,9 @@ class IEMOCAPDataset(Dataset):
         
         # 【最终且最宽松的情绪正则】
         emo_regex = re.compile(
-            r'\[.+?\]\s+'        
-            r'([\w\-]+)\s+'      
-            r'([A-Za-z]+)',      
+            r'\[.+?\]\s+' # 修正: 确保此行只有标准空格
+            r'([\w\-]+)\s+' # 修正: 确保此行只有标准空格
+            r'([A-Za-z]+)', # 修正: 确保此行只有标准空格
             re.IGNORECASE
         )
 
