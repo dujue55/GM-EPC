@@ -11,7 +11,7 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 
 # --- 特征维度常量 ---
 TEXT_DIM = 768 
-SPEECH_DIM = 1024 
+SPEECH_DIM = 768
 
 # --- 全局模型实例 ---
 global_models ={
