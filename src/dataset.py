@@ -130,25 +130,106 @@ class IEMOCAPDataset(Dataset):
         return all_samples
         
 
-    # --- _collect_session_utterances 保持不变 ---
     def _collect_session_utterances(self, session):
-        # ... (保持不变) ...
-        # 确保这里返回的 'utt_id', 'text', 'audio_path' 等字段是正确的
-        
-        # 你的原始解析逻辑是正确的，这里不需要改动。
+        """
+        解析 IEMOCAP 原始文件，收集一个 Session 内所有回合的文本、标签和音频路径。
+        """
         
         # 1. 找到该 Session 下的对话目录 (转录)
         session_dir = os.path.join(self.data_root, session, 'dialog', 'transcriptions')
         
-        # ... (省略解析代码，假设它能正确返回 final_utterance_list) ...
+        # DEBUG: 检查路径
+        # print(f"DEBUG: Checking transcription dir: {session_dir}") 
         
+        if not os.path.exists(session_dir):
+            print(f"ERROR: Transcription directory not found: {session_dir}.")
+            return [] 
+
+        # 2. 遍历转录文件以获取 Utterance ID, 文本和时间顺序
+        dialog_trans_files = [f for f in os.listdir(session_dir) if f.endswith('.txt')]
+        
+        dialog_data = {} 
+        
+        # 【转录正则】匹配：UtteranceID [TIME_START-TIME_END]: Text
+        trans_regex_full = re.compile(r'(\w+)\s*\[([\d\.]+)-([\d\.]+)]:\s*(.*)', re.M)
+
+        for trans_file_name in dialog_trans_files:
+            trans_path = os.path.join(session_dir, trans_file_name)
+            content = ""
+            
+            try:
+                with open(trans_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+            except UnicodeDecodeError:
+                with open(trans_path, 'r', encoding='latin-1') as f:
+                    content = f.read()
+
+            matches = trans_regex_full.findall(content)
+
+            for utt_id, start_time, end_time, text_raw in matches:
+                text = text_raw.strip().replace('\n', ' ')
+                dialog_data[utt_id] = {
+                    'text': text,
+                    'start': float(start_time), 
+                    'end': float(end_time),
+                }
+
+        # 3. 遍历情绪标注文件来添加情绪标签和时间顺序
+        emotion_dir = os.path.join(self.data_root, session, 'dialog', 'EmoEvaluation')
+        
+        if not os.path.exists(emotion_dir):
+            print(f"ERROR: Emotion directory not found: {emotion_dir}.")
+            return [] 
+            
+        dialog_emo_files = [f for f in os.listdir(emotion_dir) if f.endswith('.txt')]
+        
+        # 【最终且最宽松的情绪正则】
+        emo_regex = re.compile(
+            r'\[.+?\]\s+'
+            r'([\w\-]+)\s+'
+            r'([A-Za-z]+)',
+            re.IGNORECASE
+        )
+
         final_utterance_list = [] # 最终按时间顺序排列的回合列表
-        
-        # ... (你的文件解析和正则匹配代码) ...
+
+        for emo_file_name in dialog_emo_files:
+            emo_path = os.path.join(emotion_dir, emo_file_name)
+            content = ""
+            
+            try:
+                with open(emo_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+            except UnicodeDecodeError:
+                with open(emo_path, 'r', encoding='latin-1') as f:
+                    content = f.read()
+                
+            # 找到所有情绪标注匹配项
+            matches = emo_regex.findall(content)
+            
+            for utt_id, label in matches:
+                label = label.lower()
+                
+                # 检查是否在我们已经解析的转录文本中
+                if utt_id in dialog_data:
+                    data = dialog_data[utt_id]
+                    dialog_name = "_".join(utt_id.split('_')[:-1])
+                    audio_sub_path = os.path.join(
+                        session, 'sentences', 'wav', dialog_name, f'{utt_id}.wav'
+                    )
+                    full_audio_path = os.path.join(self.data_root, audio_sub_path)
+                    
+                    if label in TARGET_EMOS or label in ['fru', 'sur', 'dis', 'oth', 'xxx']:
+                        final_utterance_list.append({
+                            'utt_id': utt_id, 'text': data['text'], 'audio_path': full_audio_path,
+                            'label': label, 'start': data['start'], 'end': data['end']
+                        })
+
 
         # 4. 按 utt_id 排序确保顺序正确
-        # final_utterance_list.sort(key=lambda x: x['utt_id'])
-        return final_utterance_list # 确保你的原始解析代码返回了该列表
+        final_utterance_list.sort(key=lambda x: x['utt_id'])
+        
+        return final_utterance_list
 
 
     def __len__(self):
@@ -160,7 +241,8 @@ class IEMOCAPDataset(Dataset):
         if self.is_cached_mode:
             # --- 缓存模式：返回特征张量和标签 ---
             session = sample['session']
-            # ... (其他检查) ...
+            if session not in self.cached_features:
+                raise RuntimeError(f"Missing cached features for {session}. Check if {self.feature_cache_path} is correct.")
             
             cached_data = self.cached_features[session]
             
@@ -170,13 +252,12 @@ class IEMOCAPDataset(Dataset):
             F_s_sequence_list = []
             
             for utt_id in all_utt_ids:
-                # ... (ID 查找逻辑) ...
                 if utt_id not in cached_data['id_to_index']:
                     raise IndexError("Missing ID in cache map.") 
                     
                 index = cached_data['id_to_index'][utt_id]
                 F_t_sequence_list.append(cached_data['F_t'][index])
-                F_s_sequence_list.append(cached_data['F_s'][index]) # F_s 已经包含了 tag 信息
+                F_s_sequence_list.append(cached_data['F_s'][index])
 
             # 2. 堆叠并转换为 Tensor
             F_t_sequence = torch.tensor(np.stack(F_t_sequence_list, axis=0), dtype=torch.float32)
@@ -190,9 +271,9 @@ class IEMOCAPDataset(Dataset):
 
             return {
                 'F_t': F_t_sequence,
-                'F_s': F_s_sequence, # F_s 现在是 e2v 或 wavlm，取决于 __init__ 传入的 tag
+                'F_s': F_s_sequence, 
                 'target_label': target_label,
-                'mask': torch.ones(seq_len, dtype=torch.bool) # 序列掩码 (所有回合有效)
+                'mask': torch.ones(seq_len, dtype=torch.bool)
             }
 
 

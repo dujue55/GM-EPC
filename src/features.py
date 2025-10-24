@@ -46,19 +46,19 @@ def load_feature_extractors(device, mode="all"):
     """
     print(f"Loading feature extractors to device: {device} in mode: {mode}...")
 
-    # --- 0. 卸载所有旧模型 (重要: 释放内存) ---
-    global_models['text_model'] = None
+    # --- 0. 卸载语音模型 (只清理需要切换的) ---
+    # 🚨 修正：不清理 BERT，只清理语音相关的
     global_models['e2v_model'] = None
     global_models['wavlm_model'] = None
     global_models['wavlm_feature_extractor'] = None
     
-    # 1. BERT (Text)
-    if mode in ["all", "text"]:
+    # 1. BERT (Text) - 在任何需要特征提取的模式下都应该加载 BERT (如果未加载)
+    if global_models['text_model'] is None: # 🚨 确保只加载一次
         MODEL_NAME = "bert-base-uncased"
         global_models['tokenizer'] = AutoTokenizer.from_pretrained(MODEL_NAME)
         global_models['text_model'] = TransformersAutoModel.from_pretrained(MODEL_NAME).to(device)
         print("✅ BERT Text Model loaded.")
-
+        
     # 2. Emotion2vec (e2v)
     if mode in ["all", "e2v"]:
         try:
@@ -81,11 +81,14 @@ def load_feature_extractors(device, mode="all"):
 
 
     # === 验证模型维度 ===
-    actual_text_dim = global_models['text_model'].config.hidden_size
-    if actual_text_dim != TEXT_DIM:
-        print(f"⚠️ 警告：TEXT_DIM 常量 ({TEXT_DIM}) 与实际模型维度 ({actual_text_dim}) 不匹配。请修正 TEXT_DIM。")
+    if global_models['text_model'] is not None:
+        actual_text_dim = global_models['text_model'].config.hidden_size
+        if actual_text_dim != TEXT_DIM:
+            print(f"⚠️ 警告：TEXT_DIM 常量 ({TEXT_DIM}) 与实际模型维度 ({actual_text_dim}) 不匹配。请修正 TEXT_DIM。")
+    else:
+        print("ℹ️ 跳过 TEXT 模型维度检查 (当前模式不包含 text 模型)。")
 
-    print(f"Feature extractors loading process finished. Be aware of potential OOM issues when running all models on GPU.")
+    print("Feature extractors loading process finished. Be aware of potential OOM issues when running all models on GPU.")
 
 # 【核心修改 2】：extract_single_feature 返回三个特征序列
 def extract_single_feature(text_list, audio_path_list):
