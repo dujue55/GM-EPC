@@ -7,10 +7,10 @@ import re # 用于正则表达式解析文件
 
 # 定义情绪标签到 ID 的映射（如Happy/Excited, Angry, Sad, Neutral）
 EMO_MAP = {
-    'hap': 0, 'exc': 0,  # 统一到 Happy/Excited (ID 0)
-    'ang': 1,            # Angry (ID 1)
-    'sad': 2,            # Sad (ID 2)
-    'neu': 3,            # Neutral (ID 3)
+    'hap': 0, 'exc': 0, # 统一到 Happy/Excited (ID 0)
+    'ang': 1, # Angry (ID 1)
+    'sad': 2, # Sad (ID 2)
+    'neu': 3, # Neutral (ID 3)
 }
 # 过滤掉不需要的情绪，如 frustration, surprise, disgust, other, unknown, XXX
 TARGET_EMOS = list(EMO_MAP.keys())
