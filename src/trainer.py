@@ -1,31 +1,24 @@
-# src/trainer.py (优化版：修复 DataLoader 格式并增加数据收集)
+# src/trainer.py
 
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-from sklearn.metrics import f1_score, confusion_matrix, accuracy_score # 导入 accuracy
+from sklearn.metrics import f1_score, confusion_matrix # 用于评估
 import os
 import numpy as np
 import pandas as pd
 import time
 import copy 
-import sys 
-
-# 确保在导入前，src 路径已被添加到 Python 路径 (通常在 __init__.py 中或使用 -m 运行已解决)
-# from .model import ... # 假设这个导入是正确的
-# from .features import ... # 假设这个导入是正确的
-# from .dataset import IEMOCAPDataset # 真实 Dataset 类 (用于 Cell 4)
-
-# 从其他模块导入必要的组件 (保留原有导入方式)
-from .model import GatedMultimodalEPC, TextOnlyModel, SpeechOnlyModel, StaticFusionModel, BaseWavLMModel 
-from .features import get_dummy_features, get_dummy_labels, TEXT_DIM, SPEECH_DIM 
-from .dataset import IEMOCAPDataset # 导入真实的 Dataset 类 (假设已修改)
+import sys # 用于添加路径，以防万一
+from model import GatedMultimodalEPC, TextOnlyModel, SpeechOnlyModel, StaticFusionModel, BaseWavLMModel 
+from features import get_dummy_features, get_dummy_labels, TEXT_DIM, SPEECH_DIM 
+from dataset import IEMOCAPDataset # 修正：现在直接导入真实的 Dataset 类
+# -----------------------------------------------------------------------------------
 
 # --- 占位符：虚拟数据集 (用于本地测试) ---
 class DummyConversationDataset(Dataset):
-    # ... (保持不变，但修改 __getitem__ 返回字典以匹配实际 Dataset) ...
     def __init__(self, num_samples, history_len, num_classes):
         self.num_samples = num_samples
         self.history_len = history_len
@@ -35,32 +28,25 @@ class DummyConversationDataset(Dataset):
         return self.num_samples
 
     def __getitem__(self, idx):
-        # 注意：这里返回的特征需要是 [L, D] 形状
-        F_t, F_s = get_dummy_features(batch_size=1, sequence_length=self.history_len, text_dim=TEXT_DIM, speech_dim=SPEECH_DIM)
+        F_t, F_s = get_dummy_features(batch_size=1, sequence_length=self.history_len)
         labels = get_dummy_labels(batch_size=1, num_classes=self.num_classes)
         
-        # 修正：返回字典以匹配真实 IEMOCAPDataset.__getitem__ 的输出
-        return {
-            'F_t': F_t.squeeze(0),
-            'F_s': F_s.squeeze(0),
-            'target_label': labels.squeeze(0), # 确保是 [1] 形状的 Tensor
-            'mask': torch.ones(self.history_len, dtype=torch.bool)
-        }
+        return F_t.squeeze(0), F_s.squeeze(0), labels.squeeze(0)
 
 
 class Trainer:
     def __init__(self, model, learning_rate, weight_decay, num_classes, patience=10):
         self.model = model
-        # 修正：可以加入 class weights，但暂时保持 CrossEntropyLoss 不变
-        self.criterion = nn.CrossEntropyLoss() 
+        self.criterion = nn.CrossEntropyLoss()
         self.optimizer = AdamW(
             self.model.parameters(), 
             lr=learning_rate, 
             weight_decay=weight_decay
         )
         self.num_classes = num_classes
-        self.patience = patience 
+        self.patience = patience # 早停参数
         
+        # 检查 GPU 可用性
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
         print(f"Trainer initialized. Using device: {self.device}")
@@ -72,26 +58,25 @@ class Trainer:
         all_preds = []
         all_labels = []
 
+        # 使用 tqdm 显示进度
         desc = f"Epoch {epoch_idx + 1:02d} | Train"
-        # 修正 1：DataLoader 返回的是字典，必须通过键访问
-        for batch in tqdm(dataloader, desc=desc): 
-            F_t = batch['F_t'].to(self.device)
-            F_s = batch['F_s'].to(self.device)
-            labels = batch['target_label'].to(self.device)
+        for F_t, F_s, labels in tqdm(dataloader, desc=desc):
+            F_t, F_s, labels = F_t.to(self.device), F_s.to(self.device), labels.to(self.device)
 
-            self.optimizer.zero_grad()
+            # 1. 前向传播
             logits = self.model(F_t, F_s)
-            
-            # 确保 labels 的维度正确，通常是 [B]
-            if labels.dim() > 1:
-                labels = labels.squeeze(-1)
 
+            # 2. 计算损失
             loss = self.criterion(logits, labels)
+
+            # 3. 反向传播与优化
+            self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
 
             total_loss += loss.item() * F_t.size(0)
             
+            # 记录预测结果
             preds = torch.argmax(logits, dim=1)
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
@@ -103,45 +88,27 @@ class Trainer:
 
 
     def evaluate(self, dataloader, desc="Evaluation"):
-        self.model.eval() 
+        """
+        在验证集或测试集上评估模型性能。
+        """
+        self.model.eval() # 设置为评估模式
         total_loss = 0
         all_preds = []
         all_labels = []
-        # 新增：用于收集门控权重的列表 (仅在 GatedMultimodalEPC 模型上收集)
-        all_gate_weights = [] 
 
-        with torch.no_grad():
-            for batch in tqdm(dataloader, desc=desc): # 修正 1：接受字典
-                F_t = batch['F_t'].to(self.device)
-                F_s = batch['F_s'].to(self.device)
-                labels = batch['target_label'].to(self.device)
-                
-                if labels.dim() > 1:
-                    labels = labels.squeeze(-1)
+        with torch.no_grad(): # 评估时禁用梯度计算
+            for F_t, F_s, labels in tqdm(dataloader, desc=desc):
+                F_t, F_s, labels = F_t.to(self.device), F_s.to(self.device), labels.to(self.device)
 
-                # 检查模型是否为 GatedMultimodalEPC
-                if isinstance(self.model, GatedMultimodalEPC):
-                    # 假设 GatedMultimodalEPC 的 forward 函数返回 logits 和 gate_weights
-                    # 修正：需要在 model.py 中修改 GatedMultimodalEPC.forward 的返回
-                    # 暂时保留原状，但记住需要在 model.py 中修改：return logits, W_gate
-                    # 假设 model.forward 已经修改为返回 (logits, gate_weights)
-                    try:
-                        logits, gate_weights = self.model(F_t, F_s)
-                        # gate_weights shape: [B, L, D]
-                        # 收集最后一个回合的平均权重 (用于简化分析)
-                        # 门控权重 (W_gate[:, -1, :]) 的平均值：[B]
-                        avg_gate_per_sample = gate_weights[:, -1, :].mean(dim=-1).cpu().numpy()
-                        all_gate_weights.extend(avg_gate_per_sample)
+                # 1. 前向传播
+                logits = self.model(F_t, F_s)
 
-                    except ValueError: 
-                        # 如果模型没有返回 gate_weights (如基线模型)，则只返回 logits
-                        logits = self.model(F_t, F_s)
-                else:
-                    logits = self.model(F_t, F_s)
-                
+                # 2. 计算损失
                 loss = self.criterion(logits, labels)
+
                 total_loss += loss.item() * F_t.size(0)
                 
+                # 记录预测结果
                 preds = torch.argmax(logits, dim=1)
                 all_preds.extend(preds.cpu().numpy())
                 all_labels.extend(labels.cpu().numpy())
@@ -149,36 +116,27 @@ class Trainer:
         avg_loss = total_loss / len(dataloader.dataset)
         macro_f1 = f1_score(all_labels, all_preds, average='macro', zero_division=0)
         
-        # 修正 2：新增 UAR (Unweighted Average Recall)
-        # 在多分类中，UAR = 召回率的算术平均值。等于宏观召回率，通常用于替代宏观F1作为主要指标
-        uar = f1_score(all_labels, all_preds, average='macro', zero_division=0) 
-        
-        # 修正 3：返回所有需要的原始数据
-        return avg_loss, macro_f1, uar, all_labels, all_preds, all_gate_weights
+        # 返回评估指标和原始标签/预测值
+        return avg_loss, macro_f1, all_labels, all_preds
 
 
-# --- 外部运行函数 (run_cross_validation) ---
+# --- 外部运行函数 ---
 
-def run_cross_validation(ModelClass, config, cv_data_split):
+def run_cross_validation(ModelClass, config):
     """
     运行 Leave-One-Session-Out 交叉验证 (5折)。
     
-    :param ModelClass: 要训练的模型类
+    :param ModelClass: 要训练的模型类 (如 GatedMultimodalEPC)
     :param config: 包含所有超参数的字典
-    :param cv_data_split: 包含所有 Session 的原始数据/ID/Label 顺序 (由 dataset.py 提供)
     """
     
+    # IEMOCAP 的五个 Session
     sessions = [f'Session{i}' for i in range(1, 6)] 
     
     all_test_f1s = []
     
-    # 修正 4：新增全局数据收集列表
-    global_labels = []
-    global_preds = []
-    global_gate_weights = []
-    
-    # 结果 DataFrame (新增 UAR)
-    results_df = pd.DataFrame(columns=['Session', 'Test_Loss', 'Test_Macro_F1', 'Test_UAR', 'Train_Time_s', 'Best_Epoch', 'Params (M)'])
+    # 结果 DataFrame
+    results_df = pd.DataFrame(columns=['Session', 'Test_Loss', 'Test_Macro_F1', 'Train_Time_s', 'Best_Epoch'])
 
     print(f"\n--- Starting 5-Fold Cross-Validation for {ModelClass.__name__} ---")
 
@@ -189,26 +147,19 @@ def run_cross_validation(ModelClass, config, cv_data_split):
         
         start_time = time.time()
 
-        # --- 1. 数据加载 (真实 IEMOCAPDataset 加载) ---
-        # 假设 IEMOCAPDataset.py 已经修改为支持 feature_cache_path
-        # 并且 config 中包含了 ORIGINAL_DATA_ROOT 和 CACHED_PATH
-        
-        # 在实际运行中，您需要将 IEMOCAPDataset 实例化放在这里，并传入必要的参数
-        # 由于我们没有 cv_data_split 的具体实现，这里仍使用虚拟数据占位
-        
+        # --- 1. 数据加载 ---
+        # --- 真实数据加载 (TODO: 等待 IEMOCAP 数据下载完成后启用) ---
+        # train_dataset = IEMOCAPDataset(config['data_root'], target_session, is_train=True, history_len=config['history_len'])
+        # test_dataset = IEMOCAPDataset(config['data_root'], target_session, is_train=False, history_len=config['history_len'])
+
         # --- 虚拟数据加载 (用于本地调试) ---
         train_dataset = DummyConversationDataset(config['test_samples'] * 4, config['history_len'], config['num_classes'])
         test_dataset = DummyConversationDataset(config['test_samples'], config['history_len'], config['num_classes'])
 
-        # 真实代码应该如下 (仅供参考):
-        # train_dataset = IEMOCAPDataset(config['original_data_root'], target_session, is_train=True, history_len=config['history_len'], feature_cache_path=config['feature_cache_path'])
-        # test_dataset = IEMOCAPDataset(config['original_data_root'], target_session, is_train=False, history_len=config['history_len'], feature_cache_path=config['feature_cache_path'])
-
-
         train_dataloader = DataLoader(train_dataset, batch_size=config['batch_size'], shuffle=True)
         test_dataloader = DataLoader(test_dataset, batch_size=config['batch_size'], shuffle=False)
 
-        # --- 2. 初始化模型和 Trainer ---
+        # --- 2. 初始化模型和 Trainer (必须在每次 Fold 中重新初始化) ---
         model_instance = ModelClass(
             text_dim=TEXT_DIM, 
             speech_dim=SPEECH_DIM, 
@@ -216,52 +167,38 @@ def run_cross_validation(ModelClass, config, cv_data_split):
             num_classes=config['num_classes']
         )
         
-        # 修正 5：计算模型参数量 (用于图表 1)
-        total_params = sum(p.numel() for p in model_instance.parameters() if p.requires_grad)
-        params_in_millions = total_params / 1_000_000
-        print(f"Model Parameters: {params_in_millions:.2f} M")
-        
+        # 实例化 Trainer (Trainer 实例包含了模型和优化器)
         trainer = Trainer(
             model=model_instance, 
             learning_rate=config['learning_rate'], 
             weight_decay=config['weight_decay'], 
             num_classes=config['num_classes'],
-            patience=config['patience'] 
+            patience=config['patience'] # 确保传递早停参数
         )
         
+        # 记录最佳模型和指标
         best_f1 = -1.0
         epochs_no_improve = 0
         best_model_state = None
         best_epoch = 0
         best_loss = 0.0
-        best_uar = 0.0
-        test_labels_at_best = []
-        test_preds_at_best = []
-        test_gates_at_best = []
-
 
         # --- 3. 训练循环 (带早停) ---
         for epoch in range(config['epochs']):
             train_loss, train_f1 = trainer.train_epoch(train_dataloader, epoch)
             
             # 验证/测试集评估
-            test_loss, test_f1, test_uar, test_labels, test_preds, test_gates = trainer.evaluate(test_dataloader, desc="Test/Validation")
+            test_loss, test_f1, _, _ = trainer.evaluate(test_dataloader, desc="Test/Validation")
             
-            print(f"  --> Epoch {epoch+1:02d}: Train Loss={train_loss:.4f}, Test Loss={test_loss:.4f}, Test Macro F1={test_f1:.4f}, Test UAR={test_uar:.4f}")
+            print(f"  --> Epoch {epoch+1:02d}: Train Loss={train_loss:.4f}, Test Loss={test_loss:.4f}, Test Macro F1={test_f1:.4f}")
 
-            # --- 4. 早停和模型保存 (基于 UAR) ---
-            if test_uar > best_uar:
-                best_uar = test_uar
+            # --- 4. 早停和模型保存 ---
+            if test_f1 > best_f1:
                 best_f1 = test_f1
                 best_loss = test_loss
                 best_model_state = copy.deepcopy(model_instance.state_dict())
                 epochs_no_improve = 0
                 best_epoch = epoch + 1
-                
-                # 收集最佳 UAR 时的原始数据 (图表 2, 5, 7 的数据源)
-                test_labels_at_best = test_labels
-                test_preds_at_best = test_preds
-                test_gates_at_best = test_gates
             else:
                 epochs_no_improve += 1
             
@@ -269,26 +206,21 @@ def run_cross_validation(ModelClass, config, cv_data_split):
                 print(f"Early stopping triggered after {best_epoch} epochs (patience={config['patience']}).")
                 break
         
+        # 确保使用最佳 F1 记录结果
+        
         # --- 5. 记录最终结果 ---
         end_time = time.time()
         train_duration = end_time - start_time
         
         all_test_f1s.append(best_f1)
         
-        # 将数据添加到全局列表 (用于汇总所有 Fold 的数据，进行图表分析)
-        global_labels.extend(test_labels_at_best)
-        global_preds.extend(test_preds_at_best)
-        global_gate_weights.extend(test_gates_at_best) # 如果不是 GM-EPC 模型，此列表将是空的
-
-        # 将结果添加到 DataFrame (新增 UAR 和 Params)
+        # 将结果添加到 DataFrame
         new_row = pd.Series({
             'Session': target_session,
-            'Test_Loss': best_loss, 
+            'Test_Loss': best_loss, # 记录最佳 F1 时的损失
             'Test_Macro_F1': best_f1,
-            'Test_UAR': best_uar, # 记录最佳 UAR
             'Train_Time_s': train_duration,
-            'Best_Epoch': best_epoch,
-            'Params (M)': params_in_millions
+            'Best_Epoch': best_epoch
         })
         results_df.loc[len(results_df)] = new_row
             
@@ -296,13 +228,13 @@ def run_cross_validation(ModelClass, config, cv_data_split):
     print(f"| Cross-Validation FINISHED for {ModelClass.__name__} |")
     print("=======================================================")
     
-    avg_f1 = results_df['Test_Macro_F1'].mean()
-    std_f1 = results_df['Test_Macro_F1'].std()
+    # 计算平均性能
+    avg_f1 = np.mean(all_test_f1s)
+    std_f1 = np.std(all_test_f1s)
     
     print(f"Average Macro F1: {avg_f1:.4f} (+/- {std_f1:.4f})")
     
-    # 返回结果 DataFrame 和原始数据 (供 Cell 7 用于图表生成)
-    return results_df, global_labels, global_preds, global_gate_weights
+    return results_df
 
 
 def run_experiment(config):
@@ -316,7 +248,7 @@ def run_experiment(config):
         "Text-Only": TextOnlyModel,
         "Speech-Only": SpeechOnlyModel,
         "Static-Fusion": StaticFusionModel,
-        "Dynamic-WavLM": GatedMultimodalEPC # 修正：WavLM 的 Ablation 仍使用 GatedMultimodalEPC 结构
+        "Dynamic-WavLM": BaseWavLMModel 
     }
     
     if config['model_name'] not in model_map:
@@ -325,14 +257,11 @@ def run_experiment(config):
     ModelClass = model_map[config['model_name']]
     
     # 2. 运行交叉验证
-    # 注意：此处需要传入一个包含 IEMOCAP 数据分割信息的参数 (cv_data_split)
-    # 由于我们使用虚拟数据，这里省略 cv_data_split 参数，但在真实运行中需要传入
-    final_results = run_cross_validation(ModelClass, config, cv_data_split=None) 
+    # 直接调用 run_cross_validation 函数 (这是静态函数)
+    final_results = run_cross_validation(ModelClass, config) # <-- 修正：直接调用函数，并传入 ModelClass 和 config
     
     return final_results
 
-
-# ... (保持 if __name__ == '__main__': 逻辑不变) ...
 
 # ====================================================================
 # 本地测试代码块 (if __name__ == '__main__':)
