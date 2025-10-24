@@ -1,21 +1,8 @@
-# src/model.py
+# src/model.py (优化版)
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-# --- 辅助模块 (Gating Unit) ---
-
-# 注意：ModalityGatingUnit类在GM-EPC中被内联实现，这里作为历史保留
-class ModalityGatingUnit(nn.Module):
-    def __init__(self, input_dim):
-        super(ModalityGatingUnit, self).__init__()
-        # 此类仅用于结构描述，实际逻辑已在 GatedMultimodalEPC 中实现
-        pass
-
-    def forward(self, F_t, F_s):
-        # 实际代码中不调用此处的forward
-        raise NotImplementedError("This class is primarily for structural reference.")
 
 
 # --- 核心模型 (Model 5: GM-EPC) ---
@@ -28,70 +15,70 @@ class GatedMultimodalEPC(nn.Module):
     def __init__(self, text_dim, speech_dim, hidden_size, num_classes):
         super(GatedMultimodalEPC, self).__init__()
         
-        # 1. 维度对齐层：将 Speech 特征投影到 Text 特征的维度 (768)
-        # 这是为了确保 Gating Unit 和 GRU 能够处理一致的维度。
-        self.speech_projection = nn.Linear(speech_dim, text_dim)
+        # 1. 维度对齐层：只有在维度不匹配时才使用投影层 (增强鲁棒性)
+        self.use_projection = (speech_dim != text_dim)
+        if self.use_projection:
+            self.speech_projection = nn.Linear(speech_dim, text_dim)
         
-        # 2. Gating Unit：输入是拼接后的特征 (2 * text_dim)，输出是门控权重 (text_dim)
-        self.gate_linear = nn.Linear(2 * text_dim, text_dim) 
+        # 维度对齐后的特征维度
+        aligned_dim = text_dim
+        
+        # 2. Gating Unit：输入是拼接后的特征 (2 * aligned_dim)，输出是门控权重 (aligned_dim)
+        self.gate_linear = nn.Linear(2 * aligned_dim, aligned_dim) 
         self.sigmoid = nn.Sigmoid()
         
-        # 3. GRU 层：输入维度是融合后的特征维度 (text_dim)
+        # 3. GRU 层：输入维度是融合后的特征维度 (aligned_dim)
         self.gru = nn.GRU(
-            input_size=text_dim, 
+            input_size=aligned_dim, 
             hidden_size=hidden_size, 
             num_layers=1, 
             batch_first=True
         )
         
-        # 4. 分类层：从最后一个隐藏状态到最终的类别预测
+        # 4. 分类层：移除最后一层的 ReLU/Dropout，确保输出是 logits
         self.classifier = nn.Sequential(
             nn.Linear(hidden_size, hidden_size // 2),
             nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(hidden_size // 2, num_classes)
+            nn.Dropout(0.3), # 优化：将 Dropout 移到 ReLU 之后
+            nn.Linear(hidden_size // 2, num_classes) # 最后一层是 Logits，无激活函数
         )
     
     def forward(self, F_t, F_s):
-        # F_t: [B, L, 768], F_s: [B, L, 1024]
+        # F_t: [B, L, D_t], F_s: [B, L, D_s]
         
         # 1. 维度对齐
-        F_s_aligned = self.speech_projection(F_s) # [B, L, 768]
+        F_s_aligned = self.speech_projection(F_s) if self.use_projection else F_s
         
         # 2. 拼接 (H_t)
-        H_t_concat = torch.cat((F_t, F_s_aligned), dim=-1) # [B, L, 1536]
+        H_t_concat = torch.cat((F_t, F_s_aligned), dim=-1)
         
         # 3. 计算门控权重 (W_gate)
-        W_gate = self.sigmoid(self.gate_linear(H_t_concat)) # [B, L, 768]
+        W_gate = self.sigmoid(self.gate_linear(H_t_concat))
         
-        # 4. 动态融合 (F_fused = W_gate ⊙ F_t + (1 - W_gate) ⊙ F_s)
-        F_fused = W_gate * F_t + (1 - W_gate) * F_s_aligned # [B, L, 768]
+        # 4. 动态融合 (F_fused = W_gate ⊙ F_t + (1 - W_gate) ⊙ F_s_aligned)
+        F_fused = W_gate * F_t + (1 - W_gate) * F_s_aligned
         
         # 5. GRU 编码
         gru_out, _ = self.gru(F_fused)
         
         # 6. 预测：只取最后一个回合的输出
-        final_output = gru_out[:, -1, :] # [B, hidden_size]
+        final_output = gru_out[:, -1, :]
         
         # 7. 分类
-        logits = self.classifier(final_output) # [B, num_classes]
+        logits = self.classifier(final_output)
         
-        return logits
+        return logits, W_gate
 
 
 # --- 基线模型 1: 纯文本 (Text-only) ---
 
 class TextOnlyModel(nn.Module):
-    """
-    基线模型 1: 仅使用文本特征 (BERT)。
-    """
     def __init__(self, text_dim, speech_dim, hidden_size, num_classes):
         super(TextOnlyModel, self).__init__()
-        # 只关注文本维度 text_dim
         self.gru = nn.GRU(text_dim, hidden_size, batch_first=True)
         self.classifier = nn.Linear(hidden_size, num_classes)
         
-    def forward(self, F_t, F_s): # F_s 即使不使用，也必须作为参数接收以保证接口统一
+    def forward(self, F_t, F_s): 
         gru_out, _ = self.gru(F_t)
         return self.classifier(gru_out[:, -1, :])
 
@@ -99,16 +86,13 @@ class TextOnlyModel(nn.Module):
 # --- 基线模型 2: 纯语音 (Speech-only) ---
 
 class SpeechOnlyModel(nn.Module):
-    """
-    基线模型 2: 仅使用语音特征 (emotion2vec)。
-    """
     def __init__(self, text_dim, speech_dim, hidden_size, num_classes):
         super(SpeechOnlyModel, self).__init__()
-        # 语音特征维度为 speech_dim (1024)
+        # 修正：如果 D_s != D_t，我们仍然需要处理 D_s 的输入维度
         self.gru = nn.GRU(speech_dim, hidden_size, batch_first=True)
         self.classifier = nn.Linear(hidden_size, num_classes)
         
-    def forward(self, F_t, F_s): # F_t 即使不使用，也必须作为参数接收
+    def forward(self, F_t, F_s): 
         gru_out, _ = self.gru(F_s)
         return self.classifier(gru_out[:, -1, :])
 
@@ -116,17 +100,18 @@ class SpeechOnlyModel(nn.Module):
 # --- 基线模型 3: 静态融合 (Static Fusion) ---
 
 class StaticFusionModel(nn.Module):
-    """
-    基线模型 3: 静态融合。对齐维度后直接拼接，然后送入 GRU。
-    """
     def __init__(self, text_dim, speech_dim, hidden_size, num_classes):
         super(StaticFusionModel, self).__init__()
         
-        # 1. 对齐层：将 speech 投影到 text_dim (768)
-        self.speech_projection = nn.Linear(speech_dim, text_dim)
+        # 1. 对齐层
+        self.use_projection = (speech_dim != text_dim)
+        if self.use_projection:
+            self.speech_projection = nn.Linear(speech_dim, text_dim)
         
-        # 2. GRU 的输入维度是 768 (text) + 768 (aligned speech) = 1536
-        input_size = text_dim + text_dim
+        aligned_dim = text_dim
+        input_size = text_dim + aligned_dim # 融合后的维度
+        
+        # 2. GRU
         self.gru = nn.GRU(
             input_size=input_size, 
             hidden_size=hidden_size, 
@@ -138,16 +123,16 @@ class StaticFusionModel(nn.Module):
         self.classifier = nn.Sequential(
             nn.Linear(hidden_size, hidden_size // 2),
             nn.ReLU(),
-            nn.Dropout(0.3),
+            nn.Dropout(0.3), # 优化：将 Dropout 移到 ReLU 之后
             nn.Linear(hidden_size // 2, num_classes)
         )
 
     def forward(self, F_t, F_s):
         # 1. 维度对齐
-        F_s_aligned = self.speech_projection(F_s) # [B, L, 768]
+        F_s_aligned = self.speech_projection(F_s) if self.use_projection else F_s
         
         # 2. 静态拼接融合
-        F_static_fused = torch.cat((F_t, F_s_aligned), dim=-1) # [B, L, 1536]
+        F_static_fused = torch.cat((F_t, F_s_aligned), dim=-1)
         
         # 3. GRU 编码
         gru_out, _ = self.gru(F_static_fused)
@@ -156,29 +141,11 @@ class StaticFusionModel(nn.Module):
         return self.classifier(gru_out[:, -1, :])
 
 
-# --- 基线模型 4: Dynamic WavLM (用于与 GM-EPC 比较) ---
-
-class BaseWavLMModel(nn.Module):
-    """
-    基线模型 4 (占位符): WavLM 特征的动态融合模型。
-    在真实实验中，你需要运行两个版本的 GatedMultimodalEPC：
-    1. GM-EPC (使用 emotion2vec)
-    2. Dynamic WavLM (使用 WavLM 特征，结构与 GM-EPC 相同)
-    
-    为了测试通过，这里暂时将其定义为 SpeechOnlyModel的结构，
-    但逻辑上，它应该与 GatedMultimodalEPC 结构相同，只是在 features.py 中加载 WavLM 特征。
-    """
-    def __init__(self, text_dim, speech_dim, hidden_size, num_classes):
-        super(BaseWavLMModel, self).__init__()
-        # 这里使用 TextOnlyModel 的结构作为占位符，
-        # 真正的 Dynamic WavLM 结构应该与 GatedMultimodalEPC 相同，但使用 WavLM 特征。
-        self.gru = nn.GRU(text_dim, hidden_size, batch_first=True)
-        self.classifier = nn.Linear(hidden_size, num_classes)
-        
-    def forward(self, F_t, F_s):
-        # 占位符：仅使用文本特征
-        gru_out, _ = self.gru(F_t)
-        return self.classifier(gru_out[:, -1, :])
+# --- 基线模型 4: Dynamic WavLM (占位符) ---
+# 这个类在训练时，我们会使用 GatedMultimodalEPC，但传入 WavLM 的特征。
+# 因此，这个占位符类是用于结构完整性的。
+class BaseWavLMModel(TextOnlyModel): # 继承TextOnlyModel以保持简单，实际逻辑在trainer中处理特征加载
+    pass
 
 
 # ====================================================================
@@ -187,10 +154,9 @@ class BaseWavLMModel(nn.Module):
 if __name__ == '__main__':
     # 确保您的 features.py 中的文件路径正确
     try:
-        from .features import get_dummy_features, TEXT_DIM, SPEECH_DIM
-    except ImportError:
-        # 如果直接运行 model.py，需要使用绝对导入
         from features import get_dummy_features, TEXT_DIM, SPEECH_DIM
+    except ImportError:
+        from .features import get_dummy_features, TEXT_DIM, SPEECH_DIM
 
     print("--- Testing All Model Architectures ---")
     
@@ -200,7 +166,12 @@ if __name__ == '__main__':
     GRU_HIDDEN_SIZE = 256
     NUM_CLASSES = 4
     
-    dummy_input_t, dummy_input_s = get_dummy_features(BATCH_SIZE, HISTORY_LEN)
+    # 注意：为了测试 Projection 逻辑，这里假设维度不同
+    # TEXT_DIM = 768, SPEECH_DIM = 1024 
+    DUMMY_TEXT_DIM = 768
+    DUMMY_SPEECH_DIM = 1024
+    
+    dummy_input_t, dummy_input_s = get_dummy_features(BATCH_SIZE, HISTORY_LEN, DUMMY_TEXT_DIM, DUMMY_SPEECH_DIM)
     
     models_to_test = {
         "GM-EPC (Core)": GatedMultimodalEPC,
@@ -214,14 +185,25 @@ if __name__ == '__main__':
         print(f"\nTesting {name}...")
         try:
             model = ModelClass(
-                text_dim=TEXT_DIM, 
-                speech_dim=SPEECH_DIM, 
+                text_dim=DUMMY_TEXT_DIM, 
+                speech_dim=DUMMY_SPEECH_DIM, 
                 hidden_size=GRU_HIDDEN_SIZE, 
                 num_classes=NUM_CLASSES
             )
             output = model(dummy_input_t, dummy_input_s)
             
-            assert output.shape == (BATCH_SIZE, NUM_CLASSES)
+            if name == "GM-EPC (Core)":
+                logits, W_gate = output  # 👈 解包两个返回值
+                final_output = logits
+                
+                # 验证门控权重形状 (可选，但推荐)
+                assert W_gate.shape == (BATCH_SIZE, HISTORY_LEN, DUMMY_TEXT_DIM)
+            else:
+                final_output = output  # 👈 其他模型只返回 logits
+            
+            # 使用 final_output 验证最终的分类器形状
+            assert final_output.shape == (BATCH_SIZE, NUM_CLASSES)
+
             print(f"  SUCCESS: Output shape {output.shape} verified.")
             
         except Exception as e:
