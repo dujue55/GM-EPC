@@ -4,7 +4,9 @@ from transformers import AutoModel as TransformersAutoModel, AutoTokenizer
 
 # 2. 导入 funasr 的 AutoModel，我们继续使用 AutoModel，或者命名为 FunASRAutoModel 或 SpeechAutoModel
 from funasr import AutoModel
-import numpy as np 
+import sys # <-- 新增导入
+import os # <-- 确保 os 已导入
+from contextlib import contextmanager # <-- 新增导入
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -21,6 +23,18 @@ global_models ={
     'device': torch.device("cpu") # 默认为 CPU，在 load_feature_extractors 中会被更新
 }
 
+@contextmanager
+def suppress_funasr_output():
+    """Temporarily suppress FunASR model's stderr output."""
+    original_stderr = sys.stderr
+    # 在非 Windows 系统中使用 os.devnull 抑制输出
+    sys.stderr = open(os.devnull, 'w')
+    try:
+        yield
+    finally:
+        # 恢复原始的 stderr
+        sys.stderr.close()
+        sys.stderr = original_stderr
 
 def load_feature_extractors(device):
     """
@@ -117,14 +131,14 @@ def extract_single_feature(text_list, audio_path_list):
         try:
             # 提取特征：使用 FunASR 模型的 generate 接口
             with torch.no_grad():
-                res = speech_model.generate(
-                    input=audio_path,
-                    granularity="utterance",
-                    extract_embedding=True,
-                    progress_bar=False,   # ✅ 禁止 tqdm 进度条
-                    show_progress=False,  # ✅ 一些版本用这个参数
-                    verbose=False         # ✅ 有的版本还要加这个防止打印
-                )
+                # ✅ 关键修正：使用 suppress_funasr_output 临时抑制日志输出
+                with suppress_funasr_output():
+                    res = speech_model.generate(
+                        input=audio_path, 
+                        granularity="utterance", 
+                        extract_embedding=True 
+                        # 移除无效的 progress_bar/verbose 参数
+                    )
 
                 if isinstance(res, list) and res and 'feats' in res[0]:
                     speech_feature_np = res[0]['feats']
