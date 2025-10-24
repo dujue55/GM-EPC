@@ -7,10 +7,10 @@ import re # 用于正则表达式解析文件
 
 # 定义情绪标签到 ID 的映射（如Happy/Excited, Angry, Sad, Neutral）
 EMO_MAP = {
-    'hap': 0, 'exc': 0,  # 统一到 Happy/Excited (ID 0)
-    'ang': 1,            # Angry (ID 1)
-    'sad': 2,            # Sad (ID 2)
-    'neu': 3,            # Neutral (ID 3)
+    'hap': 0, 'exc': 0,  # 统一到 Happy/Excited (ID 0)
+    'ang': 1,            # Angry (ID 1)
+    'sad': 2,            # Sad (ID 2)
+    'neu': 3,            # Neutral (ID 3)
 }
 # 过滤掉不需要的情绪，如 frustration, surprise, disgust, other, unknown, XXX
 TARGET_EMOS = list(EMO_MAP.keys())
@@ -84,22 +84,16 @@ class IEMOCAPDataset(Dataset):
         # 1. 找到该 Session 下的对话目录 (转录)
         session_dir = os.path.join(self.data_root, session, 'dialog', 'transcriptions')
         
-        # --- 调试点 A：确认转录文件夹路径和存在性 ---
-        print(f"DEBUG A [{session}]: Checking Transcription Dir: {session_dir}") 
-        
         if not os.path.exists(session_dir):
             print(f"ERROR: Transcription directory not found: {session_dir}. Check data_root path.")
             return [] 
 
         # 2. 遍历转录文件以获取 Utterance ID, 文本和时间顺序
         dialog_trans_files = [f for f in os.listdir(session_dir) if f.endswith('.txt')]
-
-        # --- 调试点 B：确认找到转录文件数量 ---
-        print(f"DEBUG B [{session}]: Found {len(dialog_trans_files)} transcription files.")
         
         dialog_data = {} 
         
-        # 【转录正则 - 已证明正确】匹配：UtteranceID [TIME_START-TIME_END]: Text
+        # 【转录正则】匹配：UtteranceID [TIME_START-TIME_END]: Text
         trans_regex_full = re.compile(r'(\w+)\s*\[([\d\.]+)-([\d\.]+)]:\s*(.*)', re.M)
 
         for trans_file_name in dialog_trans_files:
@@ -123,39 +117,24 @@ class IEMOCAPDataset(Dataset):
                     'end': float(end_time),
                 }
 
-        # --- 调试点 C：确认正则匹配成功解析到数据 ---
-        print(f"DEBUG C [{session}]: Successfully parsed {len(dialog_data)} utterances from transcriptions.")
-
         # 3. 遍历情绪标注文件来添加情绪标签和时间顺序
         emotion_dir = os.path.join(self.data_root, session, 'dialog', 'EmoEvaluation')
-        
-        # --- 调试点 F：检查情绪文件目录 ---
-        print(f"DEBUG F [{session}]: Checking Emotion Dir: {emotion_dir}") 
         
         if not os.path.exists(emotion_dir):
             print(f"ERROR: Emotion directory not found: {emotion_dir}.")
             return [] 
             
         dialog_emo_files = [f for f in os.listdir(emotion_dir) if f.endswith('.txt')]
-
-        # --- 调试点 G：检查情绪文件数量和文件名 ---
-        print(f"DEBUG G [{session}]: Found {len(dialog_emo_files)} emotion files. Files: {dialog_emo_files[:3]}...") 
         
         if not dialog_emo_files:
             print(f"ERROR: No .txt files found in {emotion_dir}. Check file extension.")
             return []
         
-        # src/dataset.py 约 255 行
-
         # 【最终且最宽松的情绪正则】
-        # 目标：匹配 [时间] ID LABEL [VAD] 这种行
-        # 我们只匹配 ID 和紧随其后的标签，忽略时间戳和 VAD 向量的所有细节。
-        # 捕获组 1: UTTERANCE_ID (\w+)
-        # 捕获组 2: LABEL (\w+)
         emo_regex = re.compile(
-            r'\[.+?\]\s+'        # 匹配时间戳 [START - END] 和后面的空格
-            r'([\w\-]+)\s+'      # 捕获 Utterance ID (支持字母数字、下划线和短横线)
-            r'([A-Za-z]+)',      # 捕获情绪标签（只匹配字母）
+            r'\[.+?\]\s+'        
+            r'([\w\-]+)\s+'      
+            r'([A-Za-z]+)',      
             re.IGNORECASE
         )
 
@@ -172,28 +151,13 @@ class IEMOCAPDataset(Dataset):
                 with open(emo_path, 'r', encoding='latin-1') as f:
                     content = f.read()
                 
-            
-            # --- DEBUG Y (情绪文件内容检查) ---
-            # 仅在 Session1 检查第一个文件
-            if session == 'Session1' and emo_file_name == dialog_emo_files[0]:
-                print(f"DEBUG Y (Emo): Inspecting first file {emo_file_name}")
-                for i, line in enumerate(content.splitlines()):
-                    if i > 20: break 
-                    line = line.strip()
-                    if line:
-                        match = emo_regex.search(line)
-                        print(f"  Line {i} ({bool(match)}): {line[:100]}...")
-                        if match:
-                            print(f"  --> Captures: ID={match.group(1)}, Label={match.group(2)}")
-            # --- DEBUG Y 结束 ---
-                
             # 找到所有情绪标注匹配项
             matches = emo_regex.findall(content)
             
-            for utt_id, label in matches: # <--- 解包顺序是 ID, LABEL
+            for utt_id, label in matches:
                 label = label.lower()
                 
-                # 检查是否在我们已经解析的转录文本中 (这就是 Final list size = 0 的原因)
+                # 检查是否在我们已经解析的转录文本中
                 if utt_id in dialog_data:
                     data = dialog_data[utt_id]
                     dialog_name = "_".join(utt_id.split('_')[:-1])
@@ -211,9 +175,6 @@ class IEMOCAPDataset(Dataset):
 
         # 4. 按 utt_id 排序确保顺序正确
         final_utterance_list.sort(key=lambda x: x['utt_id'])
-        
-        # --- 调试点 D：确认最终合并/过滤后的数据量 ---
-        print(f"DEBUG D [{session}]: Final utterance list size: {len(final_utterance_list)}")
         
         return final_utterance_list
 
