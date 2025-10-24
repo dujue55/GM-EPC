@@ -10,7 +10,7 @@ from sklearn.metrics import f1_score, recall_score # 修正 6：导入 recall_sc
 import pandas as pd
 import time
 import copy 
-from src.utils.collate import collate_epc 
+from utils.collate import collate_epc 
 
 # --- 从其他模块导入必要的组件 ---
 from model import GatedMultimodalEPC, TextOnlyModel, SpeechOnlyModel, StaticFusionModel, BaseWavLMModel 
