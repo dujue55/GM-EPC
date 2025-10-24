@@ -73,19 +73,29 @@ class Trainer:
         all_labels = []
 
         desc = f"Epoch {epoch_idx + 1:02d} | Train"
-        # 修正 1：DataLoader 返回的是字典，必须通过键访问
         for batch in tqdm(dataloader, desc=desc): 
             F_t = batch['F_t'].to(self.device)
             F_s = batch['F_s'].to(self.device)
             labels = batch['target_label'].to(self.device)
 
             self.optimizer.zero_grad()
-            logits = self.model(F_t, F_s)
             
-            # 确保 labels 的维度正确，通常是 [B]
+            # --- 关键修正：检查模型类型并解包输出 ---
+            model_output = self.model(F_t, F_s)
+            
+            if isinstance(model_output, tuple):
+                # 如果返回的是 (logits, W_gate)
+                logits = model_output[0]
+            else:
+                # 如果只返回 logits (基线模型)
+                logits = model_output
+            # --- 修正结束 ---
+
+            # 确保 labels 的维度正确
             if labels.dim() > 1:
                 labels = labels.squeeze(-1)
 
+            # 89 行：现在 logits 确保是 Tensor
             loss = self.criterion(logits, labels)
             loss.backward()
             self.optimizer.step()
@@ -212,7 +222,7 @@ def run_cross_validation(ModelClass, config, cv_data_split):
 
         train_dataloader = DataLoader(train_dataset, batch_size=config['batch_size'], shuffle=True, collate_fn=None)
         test_dataloader = DataLoader(test_dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=None)
-        
+
         # --- 2. 初始化模型和 Trainer ---
         model_instance = ModelClass(
             text_dim=TEXT_DIM, 
