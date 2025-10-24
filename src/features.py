@@ -146,6 +146,9 @@ def extract_single_feature(text_list, audio_path_list):
     F_s_sequence = torch.stack(F_s_list, dim=0) # [L, D_s]
     
     # 🚨 注意：这里返回的张量现在将留在 GPU 上，从而解决 Runtime Error
+
+    global_models['device'] = device # <--- 修正! 将全局设备更新为实际传入的设备
+    
     return F_t_sequence, F_s_sequence 
 
 
