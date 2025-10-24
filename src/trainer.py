@@ -187,27 +187,32 @@ def run_cross_validation(ModelClass, config, cv_data_split):
         print(f"| FOLD {fold_idx + 1}/5: Test on {target_session} |")
         print(f"=======================================================")
         
-        start_time = time.time()
 
-        # --- 1. 数据加载 (真实 IEMOCAPDataset 加载) ---
-        # 假设 IEMOCAPDataset.py 已经修改为支持 feature_cache_path
-        # 并且 config 中包含了 ORIGINAL_DATA_ROOT 和 CACHED_PATH
+        # --- 1. 数据加载 (启用真实 IEMOCAPDataset 加载) ---
         
-        # 在实际运行中，您需要将 IEMOCAPDataset 实例化放在这里，并传入必要的参数
-        # 由于我们没有 cv_data_split 的具体实现，这里仍使用虚拟数据占位
+        # 实例化 IEMOCAPDataset 类，使用双路径模式加载数据
+        train_dataset = IEMOCAPDataset(
+            config['original_data_root'], 
+            target_session, 
+            is_train=True, 
+            history_len=config['history_len'], 
+            feature_cache_path=config['feature_cache_path'] # 传入缓存路径
+        )
+        test_dataset = IEMOCAPDataset(
+            config['original_data_root'], 
+            target_session, 
+            is_train=False, 
+            history_len=config['history_len'], 
+            feature_cache_path=config['feature_cache_path'] # 传入缓存路径
+        )
+
+        # --- 虚拟数据加载 (必须注释掉，确保使用真实数据) ---
+        # train_dataset = DummyConversationDataset(config['test_samples'] * 4, config['history_len'], config['num_classes'])
+        # test_dataset = DummyConversationDataset(config['test_samples'], config['history_len'], config['num_classes'])
+
+        train_dataloader = DataLoader(train_dataset, batch_size=config['batch_size'], shuffle=True, collate_fn=None)
+        test_dataloader = DataLoader(test_dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=None)
         
-        # --- 虚拟数据加载 (用于本地调试) ---
-        train_dataset = DummyConversationDataset(config['test_samples'] * 4, config['history_len'], config['num_classes'])
-        test_dataset = DummyConversationDataset(config['test_samples'], config['history_len'], config['num_classes'])
-
-        # 真实代码应该如下 (仅供参考):
-        # train_dataset = IEMOCAPDataset(config['original_data_root'], target_session, is_train=True, history_len=config['history_len'], feature_cache_path=config['feature_cache_path'])
-        # test_dataset = IEMOCAPDataset(config['original_data_root'], target_session, is_train=False, history_len=config['history_len'], feature_cache_path=config['feature_cache_path'])
-
-
-        train_dataloader = DataLoader(train_dataset, batch_size=config['batch_size'], shuffle=True)
-        test_dataloader = DataLoader(test_dataset, batch_size=config['batch_size'], shuffle=False)
-
         # --- 2. 初始化模型和 Trainer ---
         model_instance = ModelClass(
             text_dim=TEXT_DIM, 
