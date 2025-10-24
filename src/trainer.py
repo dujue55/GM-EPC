@@ -68,7 +68,7 @@ class Trainer:
         all_labels = []
 
         desc = f"Epoch {epoch_idx + 1:02d} | Train"
-        for batch in tqdm(dataloader, desc=desc): 
+        for batch in tqdm(dataloader, desc=desc, disable=True): 
             # ... (训练逻辑保持不变) ...
             F_t = batch['F_t'].to(self.device)
             F_s = batch['F_s'].to(self.device)
@@ -110,7 +110,7 @@ class Trainer:
         all_gate_weights = [] 
 
         with torch.no_grad():
-            for batch in tqdm(dataloader, desc=desc): 
+            for batch in tqdm(dataloader, desc=desc, disable=True): 
                 F_t = batch['F_t'].to(self.device)
                 F_s = batch['F_s'].to(self.device)
                 labels = batch['target_label'].to(self.device)
