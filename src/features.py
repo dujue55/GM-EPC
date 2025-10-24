@@ -118,9 +118,12 @@ def extract_single_feature(text_list, audio_path_list):
             # 提取特征：使用 FunASR 模型的 generate 接口
             with torch.no_grad():
                 res = speech_model.generate(
-                    input=audio_path, 
-                    granularity="utterance", 
-                    extract_embedding=True 
+                    input=audio_path,
+                    granularity="utterance",
+                    extract_embedding=True,
+                    progress_bar=False,   # ✅ 禁止 tqdm 进度条
+                    show_progress=False,  # ✅ 一些版本用这个参数
+                    verbose=False         # ✅ 有的版本还要加这个防止打印
                 )
 
                 if isinstance(res, list) and res and 'feats' in res[0]:
