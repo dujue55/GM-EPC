@@ -7,12 +7,10 @@ from torch.utils.data import DataLoader, Dataset
 # 🚨 修正 7：使用智能 tqdm 导入，兼容 Notebook 和命令行
 from tqdm.auto import tqdm 
 from sklearn.metrics import f1_score, recall_score # 修正 6：导入 recall_score 用于 UAR
-import os
-import numpy as np
 import pandas as pd
 import time
 import copy 
-import sys 
+from src.utils.collate import collate_epc 
 
 # --- 从其他模块导入必要的组件 ---
 from model import GatedMultimodalEPC, TextOnlyModel, SpeechOnlyModel, StaticFusionModel, BaseWavLMModel 
@@ -213,8 +211,19 @@ def run_cross_validation(ModelClass, config):
         # train_dataset = DummyConversationDataset(config['test_samples'] * 4, config['history_len'], config['num_classes'])
         # test_dataset = DummyConversationDataset(config['test_samples'], config['history_len'], config['num_classes'])
 
-        train_dataloader = DataLoader(train_dataset, batch_size=config['batch_size'], shuffle=True)
-        test_dataloader = DataLoader(test_dataset, batch_size=config['batch_size'], shuffle=False)
+        train_dataloader = DataLoader(
+            train_dataset, 
+            batch_size=config['batch_size'], 
+            shuffle=True,
+            collate_fn=collate_epc  # <-- 修正：训练集使用自定义 collate_fn
+        )
+        
+        test_dataloader = DataLoader(
+            test_dataset, 
+            batch_size=config['batch_size'], 
+            shuffle=False,
+            collate_fn=collate_epc   # <-- 修正：测试集使用自定义 collate_fn
+        )
 
         # --- 2. 初始化模型和 Trainer ---
         model_instance = ModelClass(
