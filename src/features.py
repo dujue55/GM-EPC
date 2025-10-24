@@ -4,21 +4,21 @@ from transformers import AutoModel as TransformersAutoModel, AutoTokenizer
 
 # 2. 导入 funasr 的 AutoModel，我们继续使用 AutoModel，或者命名为 FunASRAutoModel 或 SpeechAutoModel
 from funasr import AutoModel
-import numpy as np # 需要 numpy 来处理 funasr 的输出
+import numpy as np 
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 
 # --- 特征维度常量 ---
-TEXT_DIM = 768 # 假设使用 BERT Base，其输出维度为 768 (D_t)
-SPEECH_DIM = 1024 # 假设 emotion2vec 使用 1024 维度 (D_s) 
+TEXT_DIM = 768 
+SPEECH_DIM = 1024 
 
 # --- 全局模型实例 ---
-# ... (保持不变)
-
 global_models ={
     'text_model': None,
     'speech_model': None,
     'tokenizer': None,
-    'device': torch.device("cpu") # 默认为 CPU，在 run_experiment 中会被更新
+    'device': torch.device("cpu") # 默认为 CPU，在 load_feature_extractors 中会被更新
 }
 
 
@@ -29,7 +29,7 @@ def load_feature_extractors(device):
     print(f"Loading feature extractors to device: {device}...")
 
     # 1. 文本特征提取器 (BERT Base Uncased)
-    MODEL_NAME = "bert-base-uncased"  # 使用最原始名称
+    MODEL_NAME = "bert-base-uncased"
 
     global_models['tokenizer'] = AutoTokenizer.from_pretrained(
         MODEL_NAME,
@@ -37,7 +37,7 @@ def load_feature_extractors(device):
         revision="main",
         token=None
     )
-    global_models['text_model'] = TransformersAutoModel.from_pretrained( # <--- 修正!
+    global_models['text_model'] = TransformersAutoModel.from_pretrained(
         MODEL_NAME,
         trust_remote_code=False,
         revision="main",
@@ -45,14 +45,21 @@ def load_feature_extractors(device):
     ).to(device)
     
     # 2. 语音特征提取器 (emotion2vec)
-    EMOTION2VEC_MODEL_ID = "iic/emotion2vec_plus_base" 
+    EMOTION2VEC_MODEL_ID = "iic/emotion2vec_plus_base"
 
     try:
         global_models['speech_model'] = AutoModel(model=EMOTION2VEC_MODEL_ID)
+        # 注意: funasr 模型通常不直接支持 .to(device) 或在内部处理设备，
+        # 但它的 'generate' 接口通常能确保特征在正确的设备上生成。
         print(f"✅ emotion2vec model loaded: {EMOTION2VEC_MODEL_ID}")
 
     except Exception as e:
         raise RuntimeError(f"Failed to load emotion2vec model {EMOTION2VEC_MODEL_ID}. The specific error is: {e}")
+
+    # === 关键修正 1：更新全局设备状态 ===
+    # 必须在模型加载后立即更新，确保 extract_single_feature 获取正确的值
+    global_models['device'] = device 
+    print(f"✅ Global device state updated to: {global_models['device']}")
 
     # === 验证模型维度 ===
     actual_text_dim = global_models['text_model'].config.hidden_size
@@ -74,6 +81,9 @@ def extract_single_feature(text_list, audio_path_list):
     speech_model = global_models['speech_model']
     tokenizer = global_models['tokenizer']
     
+    # 调试信息 1：确认当前使用的设备
+    print(f"\n[DEBUG] extract_single_feature using device: {device}")
+    
     # 初始化特征列表
     F_t_list = []
     F_s_list = []
@@ -89,27 +99,28 @@ def extract_single_feature(text_list, audio_path_list):
             max_length=512
         )
 
-        # 确保所有必需的输入张量都被移动到 GPU (包括可能缺失的 token_type_ids/position_ids)
-        # 我们将它们移动到 GPU，并确保输入中不包含不需要的 CPU 张量
-        input_ids = inputs['input_ids'].to(device)
-        attention_mask = inputs['attention_mask'].to(device)
-        token_type_ids = inputs.get('token_type_ids', torch.zeros_like(input_ids)).to(device) # 确保 token_type_ids 存在且在 GPU
-
+        # === 关键修正 2：使用字典遍历和解包 ===
+        # 确保 inputs 字典中的所有张量都移动到正确的设备 (device)
+        inputs = {k: v.to(device) for k, v in inputs.items() if isinstance(v, torch.Tensor)}
+        
+        # 调试信息 2：检查输入张量的设备
+        for k, v in inputs.items():
+            if isinstance(v, torch.Tensor):
+                 print(f"[DEBUG] Input tensor '{k}' device: {v.device}")
+            
         # 提取特征
         with torch.no_grad():
-            outputs = text_model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                token_type_ids=token_type_ids 
-            )
+            # 使用字典解包传入所有在 GPU 上的张量
+            outputs = text_model(**inputs) 
             
             # 🚨 修正：新增特征赋值行
             text_feature = outputs.last_hidden_state[:, 0, :].squeeze(0) # (D_t)
 
         
-        F_t_list.append(text_feature) # 现在 text_feature 已定义
+        F_t_list.append(text_feature)
 
         # --- 2. 语音特征提取 (F_s) ---
+        # ... (FunASR 部分代码不变，因为问题出在 BERT 部分)
         
         try:
             # 提取特征：使用 FunASR 模型的 generate 接口
@@ -123,8 +134,7 @@ def extract_single_feature(text_list, audio_path_list):
                 if isinstance(res, list) and res and 'feats' in res[0]:
                     speech_feature_np = res[0]['feats']
                     
-                    # 🚨 修正 2：确保转换为 Tensor 后，发送到 DEVICE
-                    # 移除 .cpu()，并使用 .to(device) 明确发送到正确的设备
+                    # 确保转换为 Tensor 后，发送到 DEVICE
                     speech_feature = torch.from_numpy(speech_feature_np).float().to(device).squeeze() 
                     
                     # 运行时验证：
@@ -137,7 +147,7 @@ def extract_single_feature(text_list, audio_path_list):
 
         except Exception as e:
             print(f"Error loading or processing audio {audio_path} using FunASR: {e}. Returning zero vector.")
-            # 🚨 修正 3：确保零向量占位符在正确的设备上
+            # 确保零向量占位符在正确的设备上
             F_s_list.append(torch.zeros(SPEECH_DIM, device=device)) 
             
             
@@ -145,15 +155,14 @@ def extract_single_feature(text_list, audio_path_list):
     F_t_sequence = torch.stack(F_t_list, dim=0) # [L, D_t]
     F_s_sequence = torch.stack(F_s_list, dim=0) # [L, D_s]
     
-    # 🚨 注意：这里返回的张量现在将留在 GPU 上，从而解决 Runtime Error
-
-    global_models['device'] = device # <--- 修正! 将全局设备更新为实际传入的设备
-    
+    # 🚨 注意：这里返回的张量现在将留在 GPU 上
     return F_t_sequence, F_s_sequence 
 
 
 # ----------------------------------------------------------------------
 # 虚拟数据生成函数 (用于本地 model.py 和 trainer.py 的调试)
+# ... (保持不变) ...
+
 def get_dummy_features(batch_size, sequence_length):
     """
     返回随机生成的特征张量，模拟真正的特征提取器输出。
