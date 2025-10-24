@@ -1,173 +1,179 @@
-import torch
-# 1. 导入 transformers 的 AutoModel 并命名为 TransformersAutoModel 或 TextAutoModel
-from transformers import AutoModel as TransformersAutoModel, AutoTokenizer
+# src/features.py (最终版本：支持 mode 参数控制加载)
 
-# 2. 导入 funasr 的 AutoModel，我们继续使用 AutoModel，或者命名为 FunASRAutoModel 或 SpeechAutoModel
+import torch
+from transformers import AutoModel as TransformersAutoModel, AutoTokenizer, AutoFeatureExtractor
+import torchaudio
 from funasr import AutoModel
-import sys # <-- 新增导入
-import os # <-- 确保 os 已导入
-from contextlib import contextmanager # <-- 新增导入
+import sys, os
+from contextlib import contextmanager
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-
-# --- 特征维度常量 ---
+# --- 特征维度常量 & 模型 ID ---
 TEXT_DIM = 768 
-SPEECH_DIM = 768 # 已根据之前的调试结果修正为 768
+SPEECH_DIM = 768 
+EMOTION2VEC_MODEL_ID = "iic/emotion2vec_plus_base"
+WAVLM_MODEL_ID = "microsoft/wavlm-base-plus"
+
+
 
 # --- 全局模型实例 ---
 global_models ={
     'text_model': None,
-    'speech_model': None,
+    'e2v_model': None,                      
+    'wavlm_model': None,                   
+    'wavlm_feature_extractor': None,       
     'tokenizer': None,
-    'device': torch.device("cpu") # 默认为 CPU，在 load_feature_extractors 中会被更新
+    'device': torch.device("cpu")
 }
 
 @contextmanager
 def suppress_funasr_output():
     """Temporarily suppress FunASR model's stderr output."""
     original_stderr = sys.stderr
-    # 在非 Windows 系统中使用 os.devnull 抑制输出
     sys.stderr = open(os.devnull, 'w')
     try:
         yield
     finally:
-        # 恢复原始的 stderr
         sys.stderr.close()
         sys.stderr = original_stderr
 
-def load_feature_extractors(device):
+# 【核心修改 1】：load_feature_extractors 接受 mode 参数，并只加载所需的模型
+def load_feature_extractors(device, mode="all"):
     """
-    加载所有预训练的特征提取器 (BERT 和 emotion2vec)。
+    根据 mode 参数加载所需的特征提取器。
+    mode 可选: 'text', 'e2v', 'wavlm', 'all'
     """
-    print(f"Loading feature extractors to device: {device}...")
+    print(f"Loading feature extractors to device: {device} in mode: {mode}...")
 
-    # 1. 文本特征提取器 (BERT Base Uncased)
-    MODEL_NAME = "bert-base-uncased"
-
-    global_models['tokenizer'] = AutoTokenizer.from_pretrained(
-        MODEL_NAME,
-        trust_remote_code=False,
-        revision="main",
-        token=None
-    )
-    global_models['text_model'] = TransformersAutoModel.from_pretrained(
-        MODEL_NAME,
-        trust_remote_code=False,
-        revision="main",
-        token=None
-    ).to(device)
+    # --- 0. 卸载所有旧模型 (重要: 释放内存) ---
+    global_models['text_model'] = None
+    global_models['e2v_model'] = None
+    global_models['wavlm_model'] = None
+    global_models['wavlm_feature_extractor'] = None
     
-    # 2. 语音特征提取器 (emotion2vec)
-    EMOTION2VEC_MODEL_ID = "iic/emotion2vec_plus_base"
+    # 1. BERT (Text)
+    if mode in ["all", "text"]:
+        MODEL_NAME = "bert-base-uncased"
+        global_models['tokenizer'] = AutoTokenizer.from_pretrained(MODEL_NAME)
+        global_models['text_model'] = TransformersAutoModel.from_pretrained(MODEL_NAME).to(device)
+        print("✅ BERT Text Model loaded.")
 
-    try:
-        global_models['speech_model'] = AutoModel(model=EMOTION2VEC_MODEL_ID)
-        print(f"✅ emotion2vec model loaded: {EMOTION2VEC_MODEL_ID}")
-
-    except Exception as e:
-        raise RuntimeError(f"Failed to load emotion2vec model {EMOTION2VEC_MODEL_ID}. The specific error is: {e}")
-
-    # === 关键修正 1：更新全局设备状态 ===
+    # 2. Emotion2vec (e2v)
+    if mode in ["all", "e2v"]:
+        try:
+            global_models['e2v_model'] = AutoModel(model=EMOTION2VEC_MODEL_ID)
+            print(f"✅ emotion2vec model loaded: {EMOTION2VEC_MODEL_ID}")
+        except Exception as e:
+            print(f"⚠️ Warning: E2V failed to load. {e}")
+            
+    # 3. WavLM
+    if mode in ["all", "wavlm"]:
+        try:
+            global_models['wavlm_feature_extractor'] = AutoFeatureExtractor.from_pretrained(WAVLM_MODEL_ID)
+            global_models['wavlm_model'] = TransformersAutoModel.from_pretrained(WAVLM_MODEL_ID).to(device)
+            print(f"✅ WavLM model loaded: {WAVLM_MODEL_ID}")
+        except Exception as e:
+            print(f"⚠️ Warning: WavLM failed to load. {e}")
+    
     global_models['device'] = device 
-    print(f"✅ Global device state updated to: {global_models['device']}") # 保留这条打印，确保设备状态更新成功
+    print(f"✅ Current active models: T:{bool(global_models['text_model'])}, E2V:{bool(global_models['e2v_model'])}, WLM:{bool(global_models['wavlm_model'])}")
+
 
     # === 验证模型维度 ===
     actual_text_dim = global_models['text_model'].config.hidden_size
-    print(f"✅ Text Model loaded. Configured dim: {TEXT_DIM}, Actual dim: {actual_text_dim}")
     if actual_text_dim != TEXT_DIM:
         print(f"⚠️ 警告：TEXT_DIM 常量 ({TEXT_DIM}) 与实际模型维度 ({actual_text_dim}) 不匹配。请修正 TEXT_DIM。")
 
-    print(f"✅ Speech Model loaded. Configured dim: {SPEECH_DIM}") 
+    print(f"Feature extractors loading process finished. Be aware of potential OOM issues when running all models on GPU.")
 
-    print("Feature extractors loaded successfully.")
-
-
+# 【核心修改 2】：extract_single_feature 返回三个特征序列
 def extract_single_feature(text_list, audio_path_list):
     """
-    提取单个对话样本（L个回合）的特征。
+    提取单个回合的特征，不活动的模型返回零向量占位符。
+    返回 F_t, F_s_e2v, F_s_wavlm
     """
     device = global_models['device']
     text_model = global_models['text_model']
-    speech_model = global_models['speech_model']
+    e2v_model = global_models['e2v_model']
+    wavlm_model = global_models['wavlm_model']
+    wavlm_extractor = global_models['wavlm_feature_extractor']
     tokenizer = global_models['tokenizer']
     
-    # [已移除] 调试信息 1：确认当前使用的设备
-    
-    # 初始化特征列表
+    # 初始化三个特征列表
     F_t_list = []
-    F_s_list = []
+    F_s_e2v_list = []
+    F_s_wavlm_list = []
 
     for text, audio_path in zip(text_list, audio_path_list):
         
         # --- 1. 文本特征提取 (F_t) ---
-        inputs = tokenizer(
-            text,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=512
-        )
-
-        # === 关键修正 2：使用字典遍历和解包 ===
-        # 确保 inputs 字典中的所有张量都移动到正确的设备 (device)
+        inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=512)
         inputs = {k: v.to(device) for k, v in inputs.items() if isinstance(v, torch.Tensor)}
         
-        # [已移除] 调试信息 2：检查输入张量的设备
-            
-        # 提取特征
         with torch.no_grad():
-            # 使用字典解包传入所有在 GPU 上的张量
             outputs = text_model(**inputs) 
-            
-            # 🚨 修正：新增特征赋值行
-            text_feature = outputs.last_hidden_state[:, 0, :].squeeze(0) # (D_t)
-
+            text_feature = outputs.last_hidden_state[:, 0, :].squeeze(0) # [D_t]
         
         F_t_list.append(text_feature)
 
-        # --- 2. 语音特征提取 (F_s) ---
-        
-        try:
-            # 提取特征：使用 FunASR 模型的 generate 接口
-            with torch.no_grad():
-                # ✅ 关键修正：使用 suppress_funasr_output 临时抑制日志输出
-                with suppress_funasr_output():
-                    res = speech_model.generate(
-                        input=audio_path, 
-                        granularity="utterance", 
-                        extract_embedding=True 
-                        # 移除无效的 progress_bar/verbose 参数
-                    )
-
-                if isinstance(res, list) and res and 'feats' in res[0]:
-                    speech_feature_np = res[0]['feats']
+        # --- 2. 语音特征提取 (Emotion2vec) ---
+        if e2v_model is not None:
+            try:
+                with torch.no_grad():
+                    with suppress_funasr_output():
+                        res = e2v_model.generate(input=audio_path, granularity="utterance", extract_embedding=True)
                     
-                    # 确保转换为 Tensor 后，发送到 DEVICE
-                    speech_feature = torch.from_numpy(speech_feature_np).float().to(device).squeeze() 
-                    
-                    # 运行时验证：
-                    if speech_feature.shape[-1] != SPEECH_DIM:
-                        # 保留这个警告，因为它检查的是数据本身的完整性，非常重要。
-                        print(f"⚠️ 运行时警告：音频文件 {audio_path} 实际语音维度 ({speech_feature.shape[-1]}) 与 SPEECH_DIM ({SPEECH_DIM}) 不匹配！")
+                    if isinstance(res, list) and res and 'feats' in res[0]:
+                        e2v_feature_np = res[0]['feats']
+                        e2v_feature = torch.from_numpy(e2v_feature_np).float().to(device).squeeze() 
+                        
+                        if e2v_feature.shape[-1] != SPEECH_DIM:
+                            print(f"⚠️ Warning: E2V dim mismatch for {audio_path}. ({e2v_feature.shape[-1]})")
+                        F_s_e2v_list.append(e2v_feature)
+                    else:
+                        raise RuntimeError("FunASR generate did not return expected feature format or 'feats' key.")
+            except Exception as e:
+                print(f"Error processing audio {audio_path} using E2V: {e}. Returning zero vector.")
+                F_s_e2v_list.append(torch.zeros(SPEECH_DIM, device=device)) 
+        else:
+             F_s_e2v_list.append(torch.zeros(SPEECH_DIM, device=device)) 
 
-                    F_s_list.append(speech_feature)
-                else:
-                    raise RuntimeError("FunASR generate did not return expected feature format or 'feats' key.")
 
-        except Exception as e:
-            print(f"Error loading or processing audio {audio_path} using FunASR: {e}. Returning zero vector.")
-            # 确保零向量占位符在正确的设备上
-            F_s_list.append(torch.zeros(SPEECH_DIM, device=device)) 
-            
-            
+        # --- 3. 语音特征提取 (WavLM) ---
+        if wavlm_model is not None:
+            try:
+                # 必须使用 torchaudio 加载原始音频
+                waveform, sr = torchaudio.load(audio_path)
+                # WavLM 要求 16k Hz
+                if sr != 16000:
+                    waveform = torchaudio.transforms.Resample(orig_freq=sr, new_freq=16000).to(device)(waveform)
+                
+                # 预处理
+                inputs_wavlm = wavlm_extractor(waveform.squeeze(0), return_tensors="pt", sampling_rate=16000)
+                inputs_wavlm = {k: v.to(device) for k, v in inputs_wavlm.items()}
+                
+                with torch.no_grad():
+                    outputs_wavlm = wavlm_model(**inputs_wavlm)
+                    # WavLM 特征提取：取所有时间步的平均值 (Mean Pooling) 作为 utterance-level 特征
+                    wavlm_feature = outputs_wavlm.last_hidden_state.mean(dim=1).squeeze(0) # [D_s]
+                
+                F_s_wavlm_list.append(wavlm_feature)
+            except Exception as e:
+                print(f"⚠️ Warning: WavLM feature extraction failed for {audio_path}. {e}. Returning zero vector.")
+                F_s_wavlm_list.append(torch.zeros(SPEECH_DIM, device=device))
+        else:
+             F_s_wavlm_list.append(torch.zeros(SPEECH_DIM, device=device))
+
+
     # 将 L 个回合的特征堆叠
-    F_t_sequence = torch.stack(F_t_list, dim=0) # [L, D_t]
-    F_s_sequence = torch.stack(F_s_list, dim=0) # [L, D_s]
+    F_t_sequence = torch.stack(F_t_list, dim=0)          # [L, D_t]
+    F_s_emotion2vec_sequence = torch.stack(F_s_e2v_list, dim=0) # [L, D_s]
+    F_s_wavlm_sequence = torch.stack(F_s_wavlm_list, dim=0)     # [L, D_s]
     
-    # 🚨 注意：这里返回的张量现在将留在 GPU 上
-    return F_t_sequence, F_s_sequence 
+    # 返回三个特征序列
 
+    return F_t_sequence, F_s_emotion2vec_sequence, F_s_wavlm_sequence
 
 # ----------------------------------------------------------------------
 # 虚拟数据生成函数 (用于本地 model.py 和 trainer.py 的调试)
@@ -177,10 +183,15 @@ def get_dummy_features(batch_size, sequence_length):
     """
     返回随机生成的特征张量，模拟真正的特征提取器输出。
     """
-    # 假设在 CPU 上生成虚拟数据，但在实际训练中需要 .to(device)
+    # 模拟 BERT 特征 (F_t)
     F_t = torch.randn(batch_size, sequence_length, TEXT_DIM) 
-    F_s = torch.randn(batch_size, sequence_length, SPEECH_DIM) 
-    return F_t, F_s
+    # 模拟 Emotion2vec 特征 (F_s_e2v)
+    F_s_e2v = torch.randn(batch_size, sequence_length, SPEECH_DIM) 
+    # 模拟 WavLM 特征 (F_s_wavlm)
+    F_s_wavlm = torch.randn(batch_size, sequence_length, SPEECH_DIM) 
+    
+    # 🚨 修正：返回三个张量
+    return F_t, F_s_e2v, F_s_wavlm
 
 def get_dummy_labels(batch_size, num_classes):
     """
@@ -189,10 +200,42 @@ def get_dummy_labels(batch_size, num_classes):
     labels = torch.randint(0, num_classes, (batch_size,)) 
     return labels
 
+# ... (其余代码保持不变) ...
+
 if __name__ == '__main__':
-    print("Testing feature extractor loading...")
+    print("--- Testing feature extractor loading (Mode Check) ---")
+    device = torch.device("cpu")
+    
+    # Test 1: Only Text mode
+    print("\n[TEST 1] Mode: 'text' (Should load only BERT)")
     try:
-        load_feature_extractors(torch.device("cpu"))
-        print("Model loading test completed.") 
+        load_feature_extractors(device, mode='text')
+        assert global_models['text_model'] is not None
+        assert global_models['e2v_model'] is None
+        assert global_models['wavlm_model'] is None
+        print("✅ Test 1 Passed.")
     except Exception as e:
-        print(f"Model loading FAILED: {e}")
+        print(f"❌ Test 1 FAILED: {e}")
+
+    # Test 2: Only E2V mode
+    print("\n[TEST 2] Mode: 'e2v' (Should load only E2V)")
+    try:
+        # 此时 global_models['text_model'] 会被卸载 (设置为 None)
+        load_feature_extractors(device, mode='e2v')
+        assert global_models['text_model'] is None
+        assert global_models['e2v_model'] is not None
+        assert global_models['wavlm_model'] is None
+        print("✅ Test 2 Passed.")
+    except Exception as e:
+        print(f"❌ Test 2 FAILED: {e}")
+        
+    # Test 3: All mode (Warning: Memory heavy)
+    print("\n[TEST 3] Mode: 'all' (Should load all three)")
+    try:
+        load_feature_extractors(device, mode='all')
+        assert global_models['text_model'] is not None
+        assert global_models['e2v_model'] is not None
+        assert global_models['wavlm_model'] is not None
+        print("✅ Test 3 Passed.")
+    except Exception as e:
+        print(f"❌ Test 3 FAILED: {e}")

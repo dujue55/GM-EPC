@@ -161,17 +161,20 @@ if __name__ == '__main__':
     print("--- Testing All Model Architectures ---")
     
     # 设定测试参数
+    # 设定测试参数
     BATCH_SIZE = 8
     HISTORY_LEN = 3 
     GRU_HIDDEN_SIZE = 256
     NUM_CLASSES = 4
     
-    # 注意：为了测试 Projection 逻辑，这里假设维度不同
-    # TEXT_DIM = 768, SPEECH_DIM = 1024 
-    DUMMY_TEXT_DIM = 768
-    DUMMY_SPEECH_DIM = 1024
+    # 🚨 修正：TEXT_DIM 和 SPEECH_DIM 应从 features.py 导入，无需重新定义
+    # 假设 features.py 中的 TEXT_DIM=768, SPEECH_DIM=768 (我们之前统一了维度)
     
-    dummy_input_t, dummy_input_s = get_dummy_features(BATCH_SIZE, HISTORY_LEN, DUMMY_TEXT_DIM, DUMMY_SPEECH_DIM)
+    # 🚨 修正：调用 get_dummy_features 时只传入两个参数，并接收三个返回
+    dummy_input_t, dummy_input_s_e2v, dummy_input_s_wavlm = get_dummy_features(BATCH_SIZE, HISTORY_LEN)
+    
+    # 为了测试单模态和融合，我们统一使用 F_s_e2v 作为语音输入 F_s
+    dummy_input_s = dummy_input_s_e2v
     
     models_to_test = {
         "GM-EPC (Core)": GatedMultimodalEPC,
@@ -185,8 +188,9 @@ if __name__ == '__main__':
         print(f"\nTesting {name}...")
         try:
             model = ModelClass(
-                text_dim=DUMMY_TEXT_DIM, 
-                speech_dim=DUMMY_SPEECH_DIM, 
+                # 🚨 修正：使用导入的常量作为维度
+                text_dim=TEXT_DIM, 
+                speech_dim=SPEECH_DIM, 
                 hidden_size=GRU_HIDDEN_SIZE, 
                 num_classes=NUM_CLASSES
             )
@@ -197,7 +201,7 @@ if __name__ == '__main__':
                 final_output = logits
                 
                 # 验证门控权重形状 (可选，但推荐)
-                assert W_gate.shape == (BATCH_SIZE, HISTORY_LEN, DUMMY_TEXT_DIM)
+                assert W_gate.shape == (BATCH_SIZE, HISTORY_LEN, TEXT_DIM)
             else:
                 final_output = output  # 👈 其他模型只返回 logits
             
