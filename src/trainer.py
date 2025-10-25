@@ -264,7 +264,7 @@ def run_cross_validation(ModelClass, config):
                     
             test_loss, test_f1, test_uar, test_wa, test_labels, test_preds, test_gates = trainer.evaluate(test_dataloader, desc="Test/Validation")  
 
-            print(f"[Epoch {epoch+1:02d}] | TrainLoss={train_loss:.4f} | TestLoss={test_loss:.4f} | F1={test_f1:.4f} | UAR={test_uar:.4f} | WA={test_wa:.4f}")  
+            print(f"[Epoch {epoch+1:02d}] | TrainLoss={train_loss:.2f} | TestLoss={test_loss:.2f} | F1={test_f1:.2f} | UAR={test_uar:.2f} | WA={test_wa:.2f}")
 
             # --- 4. 早停和模型保存 (基于 UAR) ---
             if test_uar > best_uar:
