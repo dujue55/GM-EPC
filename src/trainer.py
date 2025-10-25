@@ -271,7 +271,7 @@ def run_cross_validation(ModelClass, config):
                 best_uar = test_uar
                 best_f1 = test_f1
                 best_loss = test_loss
-                # deepcopy 模型状态
+                best_wa = test_wa          # ✅ 新增：保存最佳 WA
                 best_model_state = copy.deepcopy(model_instance.state_dict())
                 epochs_no_improve = 0
                 best_epoch = epoch + 1
@@ -303,10 +303,11 @@ def run_cross_validation(ModelClass, config):
             'Test_Loss': best_loss, 
             'Test_Macro_F1': best_f1,
             'Test_UAR': best_uar, 
-            'Test_WA': test_wa,  
+            'Test_WA': best_wa,     # ✅ 改这里，写 best_wa 而不是 test_wa
             'Train_Time_s': train_duration,
             'Best_Epoch': best_epoch
         })
+
 
 
         results_df.loc[len(results_df)] = new_row
