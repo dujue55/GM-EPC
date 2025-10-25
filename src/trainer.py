@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 from torch.optim import AdamW
 from torch.utils.data import DataLoader, Dataset
-# 🚨 修正 7：使用智能 tqdm 导入，兼容 Notebook 和命令行
 from tqdm.auto import tqdm 
 from sklearn.metrics import f1_score, recall_score # 修正 6：导入 recall_score 用于 UAR
 import pandas as pd
@@ -140,7 +139,7 @@ class Trainer:
         avg_loss = total_loss / len(dataloader.dataset)
         macro_f1 = f1_score(all_labels, all_preds, average='macro', zero_division=0)
         
-        # 🚨 修正 6：正确计算 UAR (Unweighted Average Recall / Macro Recall)
+       
         uar = recall_score(all_labels, all_preds, average='macro', zero_division=0) 
         
         return avg_loss, macro_f1, uar, all_labels, all_preds, all_gate_weights
@@ -148,10 +147,10 @@ class Trainer:
 
 # --- 外部运行函数 (run_cross_validation) ---
 
-# 🚨 修正 3：移除未使用的 cv_data_split 参数
+
 def run_cross_validation(ModelClass, config):
     
-    # 🚨 修正 2：检查配置键名是否匹配
+   
     if 'original_data_root' not in config:
         config['original_data_root'] = config.get('data_root', '/path/to/iemocap') # 适配本地测试
     
@@ -167,7 +166,7 @@ def run_cross_validation(ModelClass, config):
 
     sessions = [f'Session{i}' for i in range(1, 6)] 
     
-    # 🚨 修正 1：未定义变量的初始化
+
     # 初始化结果 DataFrame
     results_df = pd.DataFrame(columns=['Session', 'Test_Loss', 'Test_Macro_F1', 'Test_UAR', 'Train_Time_s', 'Best_Epoch', 'Params (M)'])
     all_test_f1s = []
@@ -180,7 +179,6 @@ def run_cross_validation(ModelClass, config):
     print(f"\n--- Starting 5-Fold Cross-Validation for {ModelClass.__name__} (Feature: {tag}) ---")
 
     for fold_idx, target_session in enumerate(sessions):
-        # 🚨 修正 4：训练时间统计应在 fold 内部
         start_time = time.time()
         
         print(f"\n=======================================================")
@@ -245,7 +243,7 @@ def run_cross_validation(ModelClass, config):
             patience=config['patience'] 
         )
         
-        # 🚨 修正 5：早停后未重置优化器状态 (可选，但推荐)
+        
         # 每次开始训练前，重置优化器状态
         trainer.optimizer = AdamW(
             trainer.model.parameters(), 
@@ -270,7 +268,7 @@ def run_cross_validation(ModelClass, config):
             
             test_loss, test_f1, test_uar, test_labels, test_preds, test_gates = trainer.evaluate(test_dataloader, desc="Test/Validation")
             
-            # 🚨 修正 10：使用表格化日志输出
+            
             print(f"[Epoch {epoch+1:02d}] | TrainLoss={train_loss:.4f} | TestLoss={test_loss:.4f} | F1={test_f1:.4f} | UAR={test_uar:.4f}")
 
             # --- 4. 早停和模型保存 (基于 UAR) ---
@@ -367,7 +365,6 @@ if __name__ == '__main__':
         'hidden_size': 64,
         'test_samples': 20, 
         'patience': 3,
-        # 🚨 修正：添加 feature_cache_path 键
         'feature_cache_path': './GM-EPC/data/features_cache', 
         # 注意：你需要确保 run_cross_validation 使用的是 'data_root' 作为原始路径
     }

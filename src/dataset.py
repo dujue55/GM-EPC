@@ -46,6 +46,7 @@ class IEMOCAPDataset(Dataset):
         # --- 关键修改 2：在缓存模式下预加载所有特征文件 ---
         if self.is_cached_mode:
              self._load_all_cached_features()
+             print(f"🔍 DEBUG | Cached sessions detected: {list(self.cached_features.keys())}")
 
         # 基于 LOO-CV 规则切分样本
         self.samples = self._load_and_split_data(target_session, is_train)
@@ -53,7 +54,6 @@ class IEMOCAPDataset(Dataset):
 
     # --- 新增辅助方法 1：加载所有缓存特征文件 (支持 tag 区分) ---
     def _load_all_cached_features(self):
-        # 在缓存模式下，tag 必须提供，因为你要运行 Baseline 4 或 Baseline 5
         if self.speech_feature_tag not in ['e2v', 'wavlm']:
             raise ValueError("speech_feature_tag must be 'e2v' or 'wavlm' in cached mode.")
             
@@ -61,31 +61,31 @@ class IEMOCAPDataset(Dataset):
 
         for i in range(1, 6):
             session = f"Session{i}"
-            
-            # 1. 文本特征 (F_t) 和 ID 文件：通用文件名 (不带 tag)
             ft_path = os.path.join(self.feature_cache_path, f'{session}_F_t.npy')
+            fs_path = os.path.join(self.feature_cache_path, f'{session}_F_s_{tag}.npy')
             ids_path = os.path.join(self.feature_cache_path, f'{session}_utt_ids.npy')
 
-            # 2. 语音特征 (F_s)：使用 tag 区分文件名
-            fs_path = os.path.join(self.feature_cache_path, f'{session}_F_s_{tag}.npy') # <-- 关键修正
+            # ✅ 必须确保三者都存在再加载
+            if not all(os.path.exists(p) for p in [ft_path, fs_path, ids_path]):
+                print(f"⚠️ Skipping {session}: Missing one or more required feature files.")
+                continue
 
-            if os.path.exists(ft_path):
-                try:
-                    F_t = np.load(ft_path)
-                    F_s = np.load(fs_path) # <-- 加载带 tag 的文件
-                    utt_ids = np.load(ids_path, allow_pickle=True)
-                except FileNotFoundError:
-                    print(f"ERROR: Missing expected feature file for {session}. F_t or F_s_{tag} not found.")
-                    continue
+            try:
+                F_t = np.load(ft_path)
+                F_s = np.load(fs_path)
+                utt_ids = np.load(ids_path, allow_pickle=True)
+            except Exception as e:
+                print(f"❌ Error loading cached features for {session}: {e}")
+                continue
 
-                self.cached_features[session] = {
-                    'F_t': F_t,
-                    'F_s': F_s, # F_s 现在是 e2v 或 wavlm 特征，取决于 tag
-                    'id_to_index': {id: i for i, id in enumerate(utt_ids)} # ID -> Index 映射
-                }
-            else:
-                 print(f"WARNING: Feature file F_t not found for {session} at {ft_path}")
-                 
+            self.cached_features[session] = {
+                'F_t': F_t,
+                'F_s': F_s,
+                'id_to_index': {id: i for i, id in enumerate(utt_ids)}
+            }
+
+        print(f"✅ Cached sessions loaded: {list(self.cached_features.keys())}")
+
     # --- _load_and_split_data 保持不变 (它只管数据切分和标签) ---
     def _load_and_split_data(self, target_session, is_train):
         # ... (保持不变) ...
