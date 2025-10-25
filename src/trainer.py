@@ -1,4 +1,4 @@
-# src/trainer.py (最终修正版：健壮、严谨、符合学术规范)
+# src/trainer.py 
 
 import torch
 import torch.nn as nn
@@ -13,7 +13,7 @@ from utils.collate import collate_epc
 import numpy as np
 
 # --- 从其他模块导入必要的组件 ---
-from model import GatedMultimodalEPC, TextOnlyModel, SpeechOnlyModel, StaticFusionModel, BaseWavLMModel 
+from model import GatedMultimodalEPC, TextOnlyModel, SpeechOnlyModel, BaseWavLMModel
 # 假设 features.py 中的 get_dummy_features 现在返回 F_t, F_s_e2v, F_s_wavlm (三个)
 from features import get_dummy_features, get_dummy_labels, TEXT_DIM, SPEECH_DIM 
 from dataset import IEMOCAPDataset 
@@ -65,6 +65,8 @@ class Trainer:
         
         # ✅ 新增：明确接收并保存 speech_only 标志
         self.speech_only = speech_only
+        print(f"[Trainer Init] speech_only={self.speech_only} ({self.model.__class__.__name__})")
+
         
 
     def train_epoch(self, dataloader, epoch_idx):
@@ -116,7 +118,7 @@ class Trainer:
             self.optimizer.step()
 
 
-            total_loss += loss.item() * F_t.size(0)
+            total_loss += loss.item() * labels.size(0)
             
             preds = torch.argmax(logits, dim=1)
             all_preds.extend(preds.cpu().numpy())
@@ -174,7 +176,7 @@ class Trainer:
                     logits = model_output 
                 
                 loss = self.criterion(logits, labels)
-                total_loss += loss.item() * F_t.size(0)
+                total_loss += loss.item() * labels.size(0)
                 
                 preds = torch.argmax(logits, dim=1)
                 all_preds.extend(preds.cpu().numpy())
@@ -199,8 +201,8 @@ def run_cross_validation(ModelClass, config):
     
     # 根据模型类型确定使用的语音特征 tag
     model_name = ModelClass.__name__
-    if model_name in ['GatedMultimodalEPC', 'SpeechOnlyModel', 'StaticFusionModel', 'TextOnlyModel']:
-        tag = 'e2v' 
+    if model_name in ['GatedMultimodalEPC', 'SpeechOnlyModel', 'TextOnlyModel']:
+        tag = 'e2v'
     elif model_name == 'BaseWavLMModel':
         tag = 'wavlm'
     else:
@@ -388,19 +390,19 @@ def run_cross_validation(ModelClass, config):
 def run_experiment(config):
     # --- 1️⃣ 模型类映射 ---
     model_map = {
-        "GM-EPC": GatedMultimodalEPC,
-        "Text-Only": TextOnlyModel,
-        "Speech-Only": SpeechOnlyModel,
-        "Static-Fusion": StaticFusionModel,
-        "Dynamic-WavLM": BaseWavLMModel 
+        "GM-EPC": GatedMultimodalEPC,          # ✅ Gated Fusion (E2V)
+        "Text-Only": TextOnlyModel,            # ✅ Text-only baseline
+        "Speech-Only": SpeechOnlyModel,        # ✅ Speech-only (E2V)
+        "Dynamic-WavLM": BaseWavLMModel,       # ✅ Gated Fusion (WavLM)
+        "Speech-Only (WavLM)": BaseWavLMModel  # ✅ 新增实验：Speech-only (WavLM)
     }
 
-    # --- 2️⃣ 新增：展示命名映射 ---
+    # --- 2️⃣ 模型显示名称映射（用于表格与图例） ---
     display_name_map = {
         "GM-EPC": "Gated Fusion (E2V)",
         "Dynamic-WavLM": "Gated Fusion (WavLM)",
-        "Static-Fusion": "Static Fusion (E2V)",
         "Speech-Only": "Speech-Only (E2V)",
+        "Speech-Only (WavLM)": "Speech-Only (WavLM)",  # ✅ 新增
         "Text-Only": "Text-Only"
     }
     
@@ -408,8 +410,7 @@ def run_experiment(config):
         raise ValueError(f"Unknown model name: {config['model_name']}. Choose from {list(model_map.keys())}")
         
     ModelClass = model_map[config['model_name']]
-
-        # --- 自动添加一个标志，控制 forward 时是否清空 F_t ---
+    # --- 自动添加一个标志，控制 forward 时是否清空 F_t ---
     if config['model_name'] == "Speech-Only (WavLM)":
         config["speech_only"] = True
     else:
