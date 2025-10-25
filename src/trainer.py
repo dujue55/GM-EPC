@@ -10,6 +10,7 @@ import pandas as pd
 import time
 import copy 
 from utils.collate import collate_epc 
+import numpy as np
 
 # --- 从其他模块导入必要的组件 ---
 from model import GatedMultimodalEPC, TextOnlyModel, SpeechOnlyModel, StaticFusionModel, BaseWavLMModel 
@@ -124,8 +125,20 @@ class Trainer:
                     gate_weights = model_output[1] 
                     
                     # 收集最后一个回合的平均权重
-                    avg_gate_per_sample = gate_weights[:, -1, :].mean(dim=-1).cpu().numpy()
-                    all_gate_weights.extend(avg_gate_per_sample)
+                    # avg_gate_per_sample = gate_weights[:, -1, :].mean(dim=-1).cpu().numpy()
+                    # all_gate_weights.extend(avg_gate_per_sample)
+                    # ✅ 计算每个样本在时间维上的平均 gate（每一轮话的整体偏好）
+                    gate_mean_per_sample = gate_weights.mean(dim=(1, 2)).cpu().numpy()  # 平均值
+
+                    # ✅ 计算每个样本内部（时间维）的标准差，表示动态变化程度
+                    gate_std_per_sample = gate_weights.std(dim=1).mean(dim=1).cpu().numpy()  # 平均波动幅度
+
+                    # ✅ 保存两种统计量
+                    all_gate_weights.append({
+                        "mean": gate_mean_per_sample,
+                        "std": gate_std_per_sample
+                    })
+
                 else:
                     logits = model_output 
                 
@@ -322,7 +335,19 @@ def run_cross_validation(ModelClass, config):
     print(f"Average Macro F1: {avg_f1:.4f} (+/- {std_f1:.4f})")
 
     results_df = results_df.round(2)
-    
+    # === 保存 Gate 动态性数据 ===
+    if len(global_gate_weights) > 0:
+        gate_means = np.concatenate([x["mean"] for x in global_gate_weights])
+        gate_stds = np.concatenate([x["std"] for x in global_gate_weights])
+        
+        np.savez(
+            f"./gate_stats_{ModelClass.__name__}.npz",
+            gate_means=gate_means,
+            gate_stds=gate_stds
+        )
+        print(f"✅ Gate dynamics saved to gate_stats_{ModelClass.__name__}.npz")
+
+        
     # 返回结果 DataFrame 和原始数据 (供 Cell 7 用于图表生成)
     return results_df, global_labels, global_preds, global_gate_weights
 
