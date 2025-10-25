@@ -368,7 +368,7 @@ def run_cross_validation(ModelClass, config):
 
 
 def run_experiment(config):
-    # ... (ModelClass 映射保持不变) ...
+    # --- 1️⃣ 模型类映射 ---
     model_map = {
         "GM-EPC": GatedMultimodalEPC,
         "Text-Only": TextOnlyModel,
@@ -376,15 +376,39 @@ def run_experiment(config):
         "Static-Fusion": StaticFusionModel,
         "Dynamic-WavLM": BaseWavLMModel 
     }
+
+    # --- 2️⃣ 新增：展示命名映射 ---
+    display_name_map = {
+        "GM-EPC": "Gated Fusion (E2V)",
+        "Dynamic-WavLM": "Gated Fusion (WavLM)",
+        "Static-Fusion": "Static Fusion (E2V)",
+        "Speech-Only": "Speech-Only (E2V)",
+        "Text-Only": "Text-Only"
+    }
     
     if config['model_name'] not in model_map:
         raise ValueError(f"Unknown model name: {config['model_name']}. Choose from {list(model_map.keys())}")
         
     ModelClass = model_map[config['model_name']]
     
-    final_results = run_cross_validation(ModelClass, config) 
+    # --- 3️⃣ 运行交叉验证 ---
+    final_results = run_cross_validation(ModelClass, config)
     
+    # --- 4️⃣ 在内部改名：确保 DataFrame 内带上标准化名称 ---
+    if isinstance(final_results, tuple):
+        results_df = final_results[0]
+    else:
+        results_df = final_results
+
+    display_name = display_name_map.get(config['model_name'], config['model_name'])
+    if isinstance(results_df, pd.DataFrame):
+        results_df.insert(0, "Model", display_name)
+        print(f"\n📊 Final summarized results for {display_name}:\n")
+        print(results_df)
+
+    # --- 5️⃣ 保持返回结构一致 ---
     return final_results
+
 
 # ====================================================================
 # 本地测试代码块 (if __name__ == '__main__':)
