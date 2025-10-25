@@ -5,7 +5,7 @@ import torch.nn as nn
 from torch.optim import AdamW
 from torch.utils.data import DataLoader, Dataset
 from tqdm.auto import tqdm 
-from sklearn.metrics import f1_score, recall_score # 修正 6：导入 recall_score 用于 UAR
+from sklearn.metrics import f1_score, recall_score, accuracy_score 
 import pandas as pd
 import time
 import copy 
@@ -138,11 +138,10 @@ class Trainer:
 
         avg_loss = total_loss / len(dataloader.dataset)
         macro_f1 = f1_score(all_labels, all_preds, average='macro', zero_division=0)
+        uar = recall_score(all_labels, all_preds, average='macro', zero_division=0)
+        wa = accuracy_score(all_labels, all_preds)   # ✅ 新增 Weighted Accuracy
         
-       
-        uar = recall_score(all_labels, all_preds, average='macro', zero_division=0) 
-        
-        return avg_loss, macro_f1, uar, all_labels, all_preds, all_gate_weights
+        return avg_loss, macro_f1, uar, wa, all_labels, all_preds, all_gate_weights  # ✅ 多返回一个 WA
 
 
 # --- 外部运行函数 (run_cross_validation) ---
@@ -168,7 +167,7 @@ def run_cross_validation(ModelClass, config):
     
 
     # 初始化结果 DataFrame
-    results_df = pd.DataFrame(columns=['Session', 'Test_Loss', 'Test_Macro_F1', 'Test_UAR', 'Train_Time_s', 'Best_Epoch', 'Params (M)'])
+    results_df = pd.DataFrame(columns=['Session', 'Test_Loss', 'Test_Macro_F1', 'Test_UAR', 'Test_WA', 'Train_Time_s', 'Best_Epoch'])
     all_test_f1s = []
     
     # 初始化全局数据收集列表
@@ -231,9 +230,6 @@ def run_cross_validation(ModelClass, config):
             num_classes=config['num_classes']
         )
         
-        total_params = sum(p.numel() for p in model_instance.parameters() if p.requires_grad)
-        params_in_millions = total_params / 1_000_000
-        # print(f"Model Parameters: {params_in_millions:.2f} M") # 简化日志输出
         
         trainer = Trainer(
             model=model_instance, 
@@ -265,11 +261,10 @@ def run_cross_validation(ModelClass, config):
         # --- 3. 训练循环 (带早停) ---
         for epoch in range(config['epochs']):
             train_loss, train_f1 = trainer.train_epoch(train_dataloader, epoch)
-            
-            test_loss, test_f1, test_uar, test_labels, test_preds, test_gates = trainer.evaluate(test_dataloader, desc="Test/Validation")
-            
-            
-            print(f"[Epoch {epoch+1:02d}] | TrainLoss={train_loss:.4f} | TestLoss={test_loss:.4f} | F1={test_f1:.4f} | UAR={test_uar:.4f}")
+                    
+            test_loss, test_f1, test_uar, test_wa, test_labels, test_preds, test_gates = trainer.evaluate(test_dataloader, desc="Test/Validation")  
+
+            print(f"[Epoch {epoch+1:02d}] | TrainLoss={train_loss:.4f} | TestLoss={test_loss:.4f} | F1={test_f1:.4f} | UAR={test_uar:.4f} | WA={test_wa:.4f}")  
 
             # --- 4. 早停和模型保存 (基于 UAR) ---
             if test_uar > best_uar:
@@ -308,10 +303,12 @@ def run_cross_validation(ModelClass, config):
             'Test_Loss': best_loss, 
             'Test_Macro_F1': best_f1,
             'Test_UAR': best_uar, 
+            'Test_WA': test_wa,  
             'Train_Time_s': train_duration,
-            'Best_Epoch': best_epoch,
-            'Params (M)': params_in_millions
+            'Best_Epoch': best_epoch
         })
+
+
         results_df.loc[len(results_df)] = new_row
             
     print("\n=======================================================")
@@ -322,6 +319,8 @@ def run_cross_validation(ModelClass, config):
     std_f1 = results_df['Test_Macro_F1'].std()
     
     print(f"Average Macro F1: {avg_f1:.4f} (+/- {std_f1:.4f})")
+
+    results_df = results_df.round(2)
     
     # 返回结果 DataFrame 和原始数据 (供 Cell 7 用于图表生成)
     return results_df, global_labels, global_preds, global_gate_weights
