@@ -46,20 +46,26 @@ class DummyConversationDataset(Dataset):
 
 class Trainer:
     # ... (__init__ 保持不变) ...
-    def __init__(self, model, learning_rate, weight_decay, num_classes, patience=10):
+    def __init__(self, model, learning_rate, weight_decay, num_classes, patience=10, speech_only=False):
+        """
+        Trainer class with speech_only flag for WavLM single-modality control.
+        """
         self.model = model
-        self.criterion = nn.CrossEntropyLoss() 
+        self.criterion = nn.CrossEntropyLoss()
         self.optimizer = AdamW(
-            self.model.parameters(), 
-            lr=learning_rate, 
+            model.parameters(),
+            lr=learning_rate,
             weight_decay=weight_decay
         )
-        self.num_classes = num_classes
-        self.patience = patience 
-        
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
-        # print(f"Trainer initialized. Using device: {self.device}") # 简化输出
+
+        self.num_classes = num_classes
+        self.patience = patience
+        
+        # ✅ 新增：明确接收并保存 speech_only 标志
+        self.speech_only = speech_only
+        
 
     def train_epoch(self, dataloader, epoch_idx):
         self.model.train()
@@ -77,7 +83,12 @@ class Trainer:
             self.optimizer.zero_grad()
 
             # --- 前向传播 ---
-            model_output = self.model(F_t, F_s)
+            if isinstance(self.model, BaseWavLMModel) and self.speech_only:
+                F_t_input = None
+            else:
+                F_t_input = F_t
+
+            model_output = self.model(F_t_input, F_s)
 
             # --- 区分是否有 gate 输出 ---
             if isinstance(model_output, tuple):
@@ -133,7 +144,12 @@ class Trainer:
                 if labels.dim() > 1:
                     labels = labels.squeeze(-1)
 
-                model_output = self.model(F_t, F_s)
+                if isinstance(self.model, BaseWavLMModel) and self.speech_only:
+                    F_t_input = None
+                else:
+                    F_t_input = F_t
+
+                model_output = self.model(F_t_input, F_s)
                 
                 if isinstance(model_output, tuple): 
                     logits = model_output[0]
@@ -260,12 +276,14 @@ def run_cross_validation(ModelClass, config):
         
         
         trainer = Trainer(
-            model=model_instance, 
-            learning_rate=config['learning_rate'], 
-            weight_decay=config['weight_decay'], 
+            model=model_instance,
+            learning_rate=config['learning_rate'],
+            weight_decay=config['weight_decay'],
             num_classes=config['num_classes'],
-            patience=config['patience'] 
+            patience=config['patience'],
+            speech_only=config.get("speech_only", False)
         )
+
         
         
         # 每次开始训练前，重置优化器状态
@@ -390,6 +408,12 @@ def run_experiment(config):
         raise ValueError(f"Unknown model name: {config['model_name']}. Choose from {list(model_map.keys())}")
         
     ModelClass = model_map[config['model_name']]
+
+        # --- 自动添加一个标志，控制 forward 时是否清空 F_t ---
+    if config['model_name'] == "Speech-Only (WavLM)":
+        config["speech_only"] = True
+    else:
+        config["speech_only"] = False
     
     # --- 3️⃣ 运行交叉验证 ---
     final_results = run_cross_validation(ModelClass, config)
