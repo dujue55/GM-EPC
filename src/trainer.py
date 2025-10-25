@@ -75,20 +75,35 @@ class Trainer:
             labels = batch['target_label'].to(self.device)
 
             self.optimizer.zero_grad()
-            
+
+            # --- 前向传播 ---
             model_output = self.model(F_t, F_s)
-            
+
+            # --- 区分是否有 gate 输出 ---
             if isinstance(model_output, tuple):
-                logits = model_output[0]
+                logits, W_gate = model_output
             else:
                 logits = model_output
-            
+                W_gate = None
+
+            # --- 标签维度调整 ---
             if labels.dim() > 1:
                 labels = labels.squeeze(-1)
 
+            # --- 基础交叉熵损失 ---
             loss = self.criterion(logits, labels)
+
+            # --- ✅【新增】Gate Balance Regularization ---
+            # 仅对 GatedMultimodalEPC 模型启用
+            if W_gate is not None and isinstance(self.model, GatedMultimodalEPC):
+                lambda_balance = 1e-3   # 可调，建议从 1e-3 开始
+                loss_balance = torch.mean((W_gate - 0.5) ** 2)
+                loss = loss + lambda_balance * loss_balance
+
+            # --- 反向传播 ---
             loss.backward()
             self.optimizer.step()
+
 
             total_loss += loss.item() * F_t.size(0)
             
