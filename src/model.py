@@ -28,9 +28,10 @@ class GatedMultimodalEPC(nn.Module):
             nn.Linear(2 * aligned_dim, aligned_dim // 2),
             nn.ReLU(),
             nn.LayerNorm(aligned_dim // 2),
-            nn.Linear(aligned_dim // 2, 1),   # 输出单个 gate 标量而非向量
+            nn.Linear(aligned_dim // 2, aligned_dim),  # ← 输出维度改为 aligned_dim
             nn.Sigmoid()
         )
+
         
         # 3. GRU 层：输入维度是融合后的特征维度 (aligned_dim)
         self.gru = nn.GRU(
@@ -58,12 +59,11 @@ class GatedMultimodalEPC(nn.Module):
         H_t_concat = torch.cat((F_t, F_s_aligned), dim=-1)
         
         # 3. 计算门控权重 (token-level scalar)
-        gate_logits = self.gate_fc(H_t_concat).squeeze(-1)   # [B, L]
-        W_gate = gate_logits.unsqueeze(-1)         
+        gate_logits = self.gate_fc(H_t_concat)   # [B, L, D]
+        W_gate = gate_logits      
         
         # 4. 动态融合
-        F_fused = W_gate * F_t + (1 - W_gate) * F_s_aligned
-        # 5. GRU 编码
+        F_fused = W_gate * F_t + (1 - W_gate) * F_s_aligned        # 5. GRU 编码
         gru_out, _ = self.gru(F_fused)
         
         # 6. 预测：只取最后一个回合的输出
