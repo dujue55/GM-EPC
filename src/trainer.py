@@ -96,7 +96,7 @@ class Trainer:
             # --- ✅【新增】Gate Balance Regularization ---
             # 仅对 GatedMultimodalEPC 模型启用
             if W_gate is not None and isinstance(self.model, GatedMultimodalEPC):
-                lambda_balance = 1e-3   # 可调，建议从 1e-3 开始
+                lambda_balance = 5e-4   # 可调，建议从 1e-3 开始
                 loss_balance = torch.mean((W_gate - 0.5) ** 2)
                 loss = loss + lambda_balance * loss_balance
 
