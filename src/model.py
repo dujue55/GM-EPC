@@ -1,4 +1,4 @@
-# src/model.py (优化版)
+# src/model.py 
 
 import torch
 import torch.nn as nn
@@ -23,9 +23,14 @@ class GatedMultimodalEPC(nn.Module):
         # 维度对齐后的特征维度
         aligned_dim = text_dim
         
-        # 2. Gating Unit：输入是拼接后的特征 (2 * aligned_dim)，输出是门控权重 (aligned_dim)
-        self.gate_linear = nn.Linear(2 * aligned_dim, aligned_dim) 
-        self.sigmoid = nn.Sigmoid()
+        # 2. Gating Unit (Enhanced)
+        self.gate_fc = nn.Sequential(
+            nn.Linear(2 * aligned_dim, aligned_dim // 2),
+            nn.ReLU(),
+            nn.LayerNorm(aligned_dim // 2),
+            nn.Linear(aligned_dim // 2, 1),   # 输出单个 gate 标量而非向量
+            nn.Sigmoid()
+        )
         
         # 3. GRU 层：输入维度是融合后的特征维度 (aligned_dim)
         self.gru = nn.GRU(
@@ -52,12 +57,12 @@ class GatedMultimodalEPC(nn.Module):
         # 2. 拼接 (H_t)
         H_t_concat = torch.cat((F_t, F_s_aligned), dim=-1)
         
-        # 3. 计算门控权重 (W_gate)
-        W_gate = self.sigmoid(self.gate_linear(H_t_concat))
+        # 3. 计算门控权重 (token-level scalar)
+        gate_logits = self.gate_fc(H_t_concat).squeeze(-1)   # [B, L]
+        W_gate = gate_logits.unsqueeze(-1)         
         
-        # 4. 动态融合 (F_fused = W_gate ⊙ F_t + (1 - W_gate) ⊙ F_s_aligned)
+        # 4. 动态融合
         F_fused = W_gate * F_t + (1 - W_gate) * F_s_aligned
-        
         # 5. GRU 编码
         gru_out, _ = self.gru(F_fused)
         
@@ -141,11 +146,15 @@ class StaticFusionModel(nn.Module):
         return self.classifier(gru_out[:, -1, :])
 
 
-# --- 基线模型 4: Dynamic WavLM (占位符) ---
-# 这个类在训练时，我们会使用 GatedMultimodalEPC，但传入 WavLM 的特征。
-# 因此，这个占位符类是用于结构完整性的。
-class BaseWavLMModel(TextOnlyModel): # 继承TextOnlyModel以保持简单，实际逻辑在trainer中处理特征加载
+
+# --- Baseline 4: Dynamic WavLM (动态融合基线) ---
+class BaseWavLMModel(GatedMultimodalEPC):
+    """
+    Dynamic WavLM + BERT Gated EPC-Net (baseline)
+    与 GM-EPC 结构相同，但在 trainer.py 中使用 WavLM 特征。
+    """
     pass
+
 
 
 # ====================================================================
@@ -167,10 +176,7 @@ if __name__ == '__main__':
     GRU_HIDDEN_SIZE = 256
     NUM_CLASSES = 4
     
-    # 🚨 修正：TEXT_DIM 和 SPEECH_DIM 应从 features.py 导入，无需重新定义
-    # 假设 features.py 中的 TEXT_DIM=768, SPEECH_DIM=768 (我们之前统一了维度)
-    
-    # 🚨 修正：调用 get_dummy_features 时只传入两个参数，并接收三个返回
+
     dummy_input_t, dummy_input_s_e2v, dummy_input_s_wavlm = get_dummy_features(BATCH_SIZE, HISTORY_LEN)
     
     # 为了测试单模态和融合，我们统一使用 F_s_e2v 作为语音输入 F_s
@@ -201,7 +207,7 @@ if __name__ == '__main__':
                 final_output = logits
                 
                 # 验证门控权重形状 (可选，但推荐)
-                assert W_gate.shape == (BATCH_SIZE, HISTORY_LEN, TEXT_DIM)
+                assert W_gate.shape == (BATCH_SIZE, HISTORY_LEN, 1)
             else:
                 final_output = output  # 👈 其他模型只返回 logits
             
