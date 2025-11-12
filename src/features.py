@@ -13,7 +13,8 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 TEXT_DIM = 768 
 SPEECH_DIM = 768 
 # EMOTION2VEC_MODEL_ID = "iic/emotion2vec_plus_base"
-EMOTION2VEC_MODEL_ID = "iic/emotion2vec_base"
+#EMOTION2VEC_MODEL_ID = "iic/emotion2vec_base"
+EMOTION2VEC_MODEL_ID = "iic/emotion2vec_plus_seed"
 WAVLM_MODEL_ID = "microsoft/wavlm-base-plus"
 
 
