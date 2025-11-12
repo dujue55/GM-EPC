@@ -56,7 +56,6 @@ class GatedMultimodalEPC(nn.Module):
         )
     
     def forward(self, F_t, F_s):
-        # F_t: [B, L, D_t], F_s: [B, L, D_s]
         F_s_aligned = self.speech_projection(F_s) if self.use_projection else F_s
         H_t_concat = torch.cat((F_t, F_s_aligned), dim=-1)
         W_gate = self.gate_fc(H_t_concat)                   # [B, L, D]

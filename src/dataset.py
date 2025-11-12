@@ -33,7 +33,7 @@ class IEMOCAPDataset(Dataset):
         self.feature_cache_path = feature_cache_path
         self.speech_feature_tag = speech_feature_tag # <-- 保存 tag
         
-        # --- 关键修改 1：检查是否为缓存模式 ---
+        # --- 1：检查是否为缓存模式 ---
         self.is_cached_mode = (feature_cache_path is not None)
         self.cached_features = {} 
         
@@ -86,10 +86,10 @@ class IEMOCAPDataset(Dataset):
 
         print(f"✅ Cached sessions loaded: {list(self.cached_features.keys())}")
 
-    # --- _load_and_split_data 保持不变 (它只管数据切分和标签) ---
+    # --- _load_and_split_data 数据切分和标签 ---
     def _load_and_split_data(self, target_session, is_train):
-        # ... (保持不变) ...
-        # 注意: 这里需要添加你之前在 discussion 中确认的 'session', 'history_utt_ids', 'target_utt_id' 字段
+       
+       
         
         all_samples = []
         sessions_all = [f"Session{i}" for i in range(1, 6)]
