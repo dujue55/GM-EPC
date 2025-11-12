@@ -70,7 +70,7 @@ def load_feature_extractors(device, mode="all"):
     if mode in ["all", "e2v"]:
         try:
             # global_models['e2v_model'] = AutoModel(model=EMOTION2VEC_MODEL_ID)
-            global_models['e2v_model'] = AutoModel(model=EMOTION2VEC_MODEL_ID, hub="hf")
+            global_models['e2v_model'] = AutoModel(model=EMOTION2VEC_MODEL_ID)
             print(f"✅ emotion2vec model loaded: {EMOTION2VEC_MODEL_ID}")
         except Exception as e:
             print(f"⚠️ Warning: E2V failed to load. {e}")
