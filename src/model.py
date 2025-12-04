@@ -97,21 +97,30 @@ class SpeechOnlyModel(nn.Module):
 # ================================================================
 # 🌀 Model 4 & 5: BaseWavLMModel (Gated / Only)
 # ================================================================
+# class BaseWavLMModel(GatedMultimodalEPC):
+#     """
+#     ✅ 通用的 WavLM 模型基类：
+#     - 若传入 F_t=None，则退化为 Speech-Only(WavLM)
+#     - 若传入 F_t!=None，则执行 Gated Fusion(WavLM)
+#     """
+#     def forward(self, F_t, F_s):
+#         if F_t is None:  # Speech-Only 模式
+#             F_s_aligned = self.speech_projection(F_s) if self.use_projection else F_s
+#             gru_out, _ = self.gru(F_s_aligned)
+#             logits = self.classifier(gru_out[:, -1, :])
+#             return logits
+        
+#         return super().forward(F_t, F_s)
+
 class BaseWavLMModel(GatedMultimodalEPC):
-    """
-    ✅ 通用的 WavLM 模型基类：
-    - 若传入 F_t=None，则退化为 Speech-Only(WavLM)
-    - 若传入 F_t!=None，则执行 Gated Fusion(WavLM)
-    """
     def forward(self, F_t, F_s):
-        if F_t is None:  # Speech-Only 模式
-            F_s_aligned = self.speech_projection(F_s) if self.use_projection else F_s
-            gru_out, _ = self.gru(F_s_aligned)
+        if F_t is None: # Speech-Only 模式
+            gru_out, _ = self.gru(F_s) 
             logits = self.classifier(gru_out[:, -1, :])
             return logits
         
+        # 多模态模式：使用投影，并调用父类 Gated Fusion 逻辑
         return super().forward(F_t, F_s)
-
 
 # ================================================================
 # ✅ Local Test (for debugging)
