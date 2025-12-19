@@ -1,4 +1,4 @@
-# src/dataset.py (已修改：支持加载 F_s_e2v 或 F_s_wavlm)
+# src/dataset.py 
 
 import torch
 from torch.utils.data import Dataset
@@ -22,7 +22,7 @@ class IEMOCAPDataset(Dataset):
     """
     
     def __init__(self, data_root, target_session, is_train=True, history_len=3, 
-                 feature_cache_path=None, speech_feature_tag=None): # <-- 关键新增 tag 参数
+                 feature_cache_path=None, speech_feature_tag=None): 
         """
         初始化数据集。
         :param feature_cache_path: 只有在模型训练阶段才传入。
@@ -43,7 +43,7 @@ class IEMOCAPDataset(Dataset):
             session_name = f"Session{i}"
             self.raw_utterances_by_session[session_name] = self._collect_session_utterances(session_name)
         
-        # --- 关键修改 2：在缓存模式下预加载所有特征文件 ---
+        # ---  2：在缓存模式下预加载所有特征文件 ---
         if self.is_cached_mode:
              self._load_all_cached_features()
              print(f"🔍 DEBUG | Cached sessions detected: {list(self.cached_features.keys())}")
@@ -52,7 +52,7 @@ class IEMOCAPDataset(Dataset):
         self.samples = self._load_and_split_data(target_session, is_train)
         print(f"Loaded {'Train' if is_train else 'Test'} samples: {len(self.samples)} for target session {target_session}")
 
-    # --- 新增辅助方法 1：加载所有缓存特征文件 (支持 tag 区分) ---
+    # --- 加载所有缓存特征文件 (支持 tag 区分) ---
     def _load_all_cached_features(self):
         if self.speech_feature_tag not in ['e2v', 'wavlm']:
             raise ValueError("speech_feature_tag must be 'e2v' or 'wavlm' in cached mode.")
@@ -65,7 +65,7 @@ class IEMOCAPDataset(Dataset):
             fs_path = os.path.join(self.feature_cache_path, f'{session}_F_s_{tag}.npy')
             ids_path = os.path.join(self.feature_cache_path, f'{session}_utt_ids.npy')
 
-            # ✅ 必须确保三者都存在再加载
+            #  必须确保三者都存在再加载
             if not all(os.path.exists(p) for p in [ft_path, fs_path, ids_path]):
                 print(f"⚠️ Skipping {session}: Missing one or more required feature files.")
                 continue
@@ -311,7 +311,7 @@ if __name__ == '__main__':
         print("\n--- Testing Model Training Mode (Cached Features) ---")
         # 注意: 运行此模式需要 CACHE_ROOT 真实存在且包含特征文件
         
-        # 🚨 修正：必须传入 speech_feature_tag 参数
+        
         train_dataset_cached = IEMOCAPDataset(
             IEMOCAP_ROOT, 
             target_session='Session5', 

@@ -31,15 +31,14 @@ class DummyConversationDataset(Dataset):
         return self.num_samples
 
     def __getitem__(self, idx):
-        # 🚨 修正：从 features 导入的 get_dummy_features 现在返回 F_t, F_s_e2v, F_s_wavlm (三个)
         F_t, F_s_e2v, F_s_wavlm = get_dummy_features(batch_size=1, sequence_length=self.history_len)
         labels = get_dummy_labels(batch_size=1, num_classes=self.num_classes)
         
         # 默认使用 F_s_e2v 作为通用 F_s 进行测试
         return {
-            'F_t': F_t.squeeze(0),
-            'F_s': F_s_e2v.squeeze(0), 
-            'target_label': labels.squeeze(0), 
+            'F_t': F_t.squeeze(0).float(),
+            'F_s': F_s_e2v.squeeze(0).float(),
+            'target_label': labels.squeeze(0).long(),
             'mask': torch.ones(self.history_len, dtype=torch.bool)
         }
 
@@ -63,7 +62,7 @@ class Trainer:
         self.num_classes = num_classes
         self.patience = patience
         
-        # ✅ 新增：明确接收并保存 speech_only 标志
+       
         self.speech_only = speech_only
         print(f"[Trainer Init] speech_only={self.speech_only} ({self.model.__class__.__name__})")
 
@@ -106,7 +105,7 @@ class Trainer:
             # --- 基础交叉熵损失 ---
             loss = self.criterion(logits, labels)
 
-            # --- ✅【新增】Gate Balance Regularization ---
+            
             # 仅对 GatedMultimodalEPC 模型启用
             if W_gate is not None and isinstance(self.model, GatedMultimodalEPC):
                 lambda_balance = 5e-4   # 可调，建议从 1e-3 开始
@@ -160,13 +159,13 @@ class Trainer:
                     # 收集最后一个回合的平均权重
                     # avg_gate_per_sample = gate_weights[:, -1, :].mean(dim=-1).cpu().numpy()
                     # all_gate_weights.extend(avg_gate_per_sample)
-                    # ✅ 计算每个样本在时间维上的平均 gate（每一轮话的整体偏好）
+                    #  计算每个样本在时间维上的平均 gate（每一轮话的整体偏好）
                     gate_mean_per_sample = gate_weights.mean(dim=(1, 2)).cpu().numpy()  # 平均值
 
-                    # ✅ 计算每个样本内部（时间维）的标准差，表示动态变化程度
+                    #  计算每个样本内部（时间维）的标准差，表示动态变化程度
                     gate_std_per_sample = gate_weights.std(dim=1).mean(dim=1).cpu().numpy()  # 平均波动幅度
 
-                    # ✅ 保存两种统计量
+                    #  保存两种统计量
                     all_gate_weights.append({
                         "mean": gate_mean_per_sample,
                         "std": gate_std_per_sample
@@ -250,7 +249,7 @@ def run_cross_validation(ModelClass, config):
             speech_feature_tag=tag 
         )
 
-        # 🚨 替换：使用虚拟数据加载器进行本地测试（如果需要）
+        #  替换：使用虚拟数据加载器进行本地测试（如果需要）
         # train_dataset = DummyConversationDataset(config['test_samples'] * 4, config['history_len'], config['num_classes'])
         # test_dataset = DummyConversationDataset(config['test_samples'], config['history_len'], config['num_classes'])
 
@@ -319,7 +318,7 @@ def run_cross_validation(ModelClass, config):
                 best_uar = test_uar
                 best_f1 = test_f1
                 best_loss = test_loss
-                best_wa = test_wa          # ✅ 新增：保存最佳 WA
+                best_wa = test_wa          # 保存最佳 WA
                 best_model_state = copy.deepcopy(model_instance.state_dict())
                 epochs_no_improve = 0
                 best_epoch = epoch + 1
@@ -336,7 +335,7 @@ def run_cross_validation(ModelClass, config):
                 break
         
         # --- 5. 记录最终结果 ---
-        train_duration = time.time() - start_time # 🚨 修正 4：记录当前 fold 的总耗时
+        train_duration = time.time() - start_time 
         
         all_test_f1s.append(best_f1)
         
@@ -351,7 +350,7 @@ def run_cross_validation(ModelClass, config):
             'Test_Loss': best_loss, 
             'Test_Macro_F1': best_f1,
             'Test_UAR': best_uar, 
-            'Test_WA': best_wa,     # ✅ 改这里，写 best_wa 而不是 test_wa
+            'Test_WA': best_wa,     
             'Train_Time_s': train_duration,
             'Best_Epoch': best_epoch
         })
@@ -390,11 +389,11 @@ def run_cross_validation(ModelClass, config):
 def run_experiment(config):
     # --- 1️⃣ 模型类映射 ---
     model_map = {
-        "GM-EPC": GatedMultimodalEPC,          # ✅ Gated Fusion (E2V)
-        "Text-Only": TextOnlyModel,            # ✅ Text-only baseline
-        "Speech-Only": SpeechOnlyModel,        # ✅ Speech-only (E2V)
-        "Dynamic-WavLM": BaseWavLMModel,       # ✅ Gated Fusion (WavLM)
-        "Speech-Only (WavLM)": BaseWavLMModel  # ✅ 新增实验：Speech-only (WavLM)
+        "GM-EPC": GatedMultimodalEPC,          #  Gated Fusion (E2V)
+        "Text-Only": TextOnlyModel,            #  Text-only baseline
+        "Speech-Only": SpeechOnlyModel,        #  Speech-only (E2V)
+        "Dynamic-WavLM": BaseWavLMModel,       #  Gated Fusion (WavLM)
+        "Speech-Only (WavLM)": BaseWavLMModel  #  新增实验：Speech-only (WavLM)
     }
 
     # --- 2️⃣ 模型显示名称映射（用于表格与图例） ---
@@ -402,7 +401,7 @@ def run_experiment(config):
         "GM-EPC": "Gated Fusion (E2V)",
         "Dynamic-WavLM": "Gated Fusion (WavLM)",
         "Speech-Only": "Speech-Only (E2V)",
-        "Speech-Only (WavLM)": "Speech-Only (WavLM)",  # ✅ 新增
+        "Speech-Only (WavLM)": "Speech-Only (WavLM)",  #  新增
         "Text-Only": "Text-Only"
     }
     
