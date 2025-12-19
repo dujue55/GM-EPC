@@ -1,8 +1,5 @@
 # GM-EPC: Gated Multimodal Emotion Prediction in Conversation
 
-This repository contains the implementation and experimental code for the paper  
-**“A Gated Multimodal Framework for Emotion Prediction in Conversation (GM-EPC)”**.
-
 ## Project Structure
 
 The codebase is organized into two main parts:
