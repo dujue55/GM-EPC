@@ -20,10 +20,11 @@ src/
   features.py             # Speech and text feature extraction  
   model.py                # GM-EPC model definition  
   trainer.py              # Training and evaluation logic  
-  utils/                  # Utility functions   
+  utils/                  # Utility functions (e.g., custom collate function for variable-length conversations)
 
 requirements.txt          # Dependencies for Kaggle / GPU environment  
-requirements-local.txt    # Dependencies for local development  
+requirements-local.txt    # Dependencies for local development
+
 
 ## Dataset
 
