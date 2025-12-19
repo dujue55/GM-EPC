@@ -12,6 +12,7 @@ The codebase is organized into two main parts:
 
 ## Directory Overview
 
+```
 notebooks/  
   main-experiment.ipynb   # Main experiment notebook (GPU / Kaggle)
 
@@ -24,7 +25,7 @@ src/
 
 requirements.txt          # Dependencies for Kaggle / GPU environment  
 requirements-local.txt    # Dependencies for local development
-
+```
 
 ## Dataset
 
